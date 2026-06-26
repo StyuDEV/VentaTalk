@@ -3,6 +3,10 @@
 // Garder la plus récente en haut de l'objet pour s'y retrouver.
 
 export const CHANGELOG: Record<string, string[]> = {
+  '1.0.2': [
+    'Accélération GPU pour les cartes AMD et Intel (en plus de NVIDIA), détectée automatiquement.',
+    'Sélecteur de carte graphique dans les réglages et l’assistant.'
+  ],
   '1.0.1': [
     'Nouveau bouton « Désinstaller » : retire l’application, les modèles et toutes les données en une seule fois.',
     'Configuration du micro revue dans l’assistant : choix du micro + niveau sonore en direct (en dB).',
