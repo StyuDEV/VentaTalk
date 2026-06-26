@@ -21,6 +21,8 @@ import {
   isPresent,
   isGpuBinPresent,
   ensureWhisperGpuBin,
+  resolveWhisperEngine,
+  detectGpuVendor,
   downloadModel,
   type DownloadProgress
 } from './models'
@@ -396,7 +398,7 @@ function registerIpc(): void {
       approxBytes: LLM_MODEL.approxBytes,
       present: isPresent(LLM_MODEL)
     },
-    gpu: { present: isGpuBinPresent() }
+    gpu: { present: isGpuBinPresent(), engine: resolveWhisperEngine(), vendor: detectGpuVendor() }
   }))
 
   ipcMain.handle('models:download', async (_e, kind: string) => {

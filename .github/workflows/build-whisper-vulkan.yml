@@ -1,0 +1,68 @@
+name: build-whisper-vulkan
+
+# Construit le moteur whisper.cpp **Vulkan** (compatible AMD / Intel / NVIDIA) et le publie
+# comme release `whisper-vulkan-v1`. VentaTalk le télécharge automatiquement pour les GPU
+# non-NVIDIA (voir src/main/models.ts -> WHISPER_ENGINES.vulkan).
+#
+# Lancement : onglet "Actions" du repo -> "build-whisper-vulkan" -> "Run workflow".
+# (Manuel uniquement ; ~10-15 min. La 1re exécution peut nécessiter un petit ajustement
+#  du chemin du Vulkan SDK selon l'installeur LunarG du moment.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_ref:
+        description: "Tag whisper.cpp à compiler (doit matcher la version du moteur CUDA, v1.9.1)"
+        default: "v1.9.1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Installer le Vulkan SDK (LunarG, headless)
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\vulkan-sdk.exe"
+          curl.exe -L -o $exe "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe"
+          Start-Process -FilePath $exe -ArgumentList "--root","C:\VulkanSDK","--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          if (-not (Test-Path "C:\VulkanSDK\Include\vulkan")) { throw "Vulkan SDK non installé au chemin attendu" }
+          "VULKAN_SDK=C:\VulkanSDK" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\VulkanSDK\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Cloner whisper.cpp
+        shell: pwsh
+        run: git clone --depth 1 --branch ${{ github.event.inputs.whisper_ref }} https://github.com/ggml-org/whisper.cpp.git wcpp
+
+      - name: Compiler whisper.cpp (Vulkan, DLLs partagées)
+        shell: pwsh
+        run: |
+          cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release `
+            -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON -DWHISPER_SDL2=OFF -DWHISPER_BUILD_TESTS=OFF
+          cmake --build wcpp/build --config Release -j
+
+      - name: Packager (whisper-server.exe + DLLs, dont ggml-vulkan.dll)
+        shell: pwsh
+        run: |
+          $bin = "wcpp\build\bin\Release"
+          if (-not (Test-Path "$bin\whisper-server.exe")) { throw "whisper-server.exe introuvable dans $bin" }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item "$bin\whisper-server.exe" out\
+          Copy-Item "$bin\whisper-cli.exe" out\ -ErrorAction SilentlyContinue
+          Copy-Item "$bin\*.dll" out\
+          Get-ChildItem out | Format-Table Name,Length -AutoSize
+          Compress-Archive -Path out\* -DestinationPath whisper-vulkan-bin-x64.zip -Force
+
+      - name: Publier la release whisper-vulkan-v1
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view whisper-vulkan-v1 *> $null
+          if ($LASTEXITCODE -eq 0) { gh release delete whisper-vulkan-v1 --yes --cleanup-tag }
+          gh release create whisper-vulkan-v1 whisper-vulkan-bin-x64.zip `
+            --title "Moteur whisper Vulkan (AMD / Intel)" `
+            --notes "Construit en CI depuis whisper.cpp ${{ github.event.inputs.whisper_ref }} (GGML_VULKAN=ON). Téléchargé automatiquement par VentaTalk pour les GPU non-NVIDIA. Ne pas supprimer ce tag." `
+            --latest=false

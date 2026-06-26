@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { Readable } from 'node:stream'
-import type { WhisperModelId } from './settings'
+import { getSetting, type WhisperModelId } from './settings'
 
 export interface ModelInfo {
   id: string
@@ -157,28 +157,107 @@ export function cleanupPartial(info: ModelInfo): void {
   }
 }
 
-// ───────────────────────────────── moteur GPU (whisper.cpp CUDA) ──
+// ─────────────────────── moteurs GPU whisper (auto-détectés selon la carte) ──
+// NVIDIA → CUDA (le plus rapide) ; AMD/Intel (ou inconnu) → Vulkan (universel, via le pilote
+// système). Repli CPU = smart-whisper (cf. transcribe.ts) si aucun moteur GPU n'est présent.
 
-/** Build CUDA 12.4 de whisper.cpp (runtime cuBLAS inclus, pas besoin du toolkit). */
-export const WHISPER_GPU: ModelInfo = {
-  id: 'whisper-gpu',
-  file: 'whisper-cublas-12.4.0-bin-x64.zip',
-  url: 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-cublas-12.4.0-bin-x64.zip',
-  approxBytes: 260_000_000
+export type WhisperEngine = 'cuda' | 'vulkan'
+export type GpuVendor = 'nvidia' | 'amd' | 'intel' | 'none'
+
+interface EngineInfo extends ModelInfo {
+  subfolder: string
 }
 
-export function whisperBinDir(): string {
-  const d = join(app.getPath('userData'), 'whisper-bin')
+export const WHISPER_ENGINES: Record<WhisperEngine, EngineInfo> = {
+  cuda: {
+    id: 'whisper-cuda',
+    subfolder: 'cuda',
+    file: 'whisper-cublas-12.4.0-bin-x64.zip',
+    url: 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-cublas-12.4.0-bin-x64.zip',
+    approxBytes: 260_000_000
+  },
+  vulkan: {
+    id: 'whisper-vulkan',
+    subfolder: 'vulkan',
+    // Construit en CI sur le repo (.github/workflows/build-whisper-vulkan.yml) — léger (~20-60 Mo),
+    // utilise le pilote Vulkan du système (AMD / Intel / NVIDIA). Tag de release : whisper-vulkan-v1.
+    file: 'whisper-vulkan-bin-x64.zip',
+    url: 'https://github.com/StyuDEV/VentaTalk/releases/download/whisper-vulkan-v1/whisper-vulkan-bin-x64.zip',
+    approxBytes: 60_000_000
+  }
+}
+
+let cachedVendor: GpuVendor | null = null
+/** Fabricant du GPU via Win32_VideoController (mis en cache : le matériel ne change pas au runtime). */
+export function detectGpuVendor(): GpuVendor {
+  if (cachedVendor) return cachedVendor
+  let names = ''
+  try {
+    const r = spawnSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', '(Get-CimInstance Win32_VideoController).Name -join "|"'],
+      { windowsHide: true, encoding: 'utf8', timeout: 5000 }
+    )
+    names = (r.stdout || '').toLowerCase()
+  } catch {
+    /* noop */
+  }
+  cachedVendor = /nvidia|geforce|\brtx\b|\bgtx\b|quadro/.test(names)
+    ? 'nvidia'
+    : /amd|radeon|\bati\b/.test(names)
+      ? 'amd'
+      : /intel|\barc\b|iris|hd graphics|\buhd\b/.test(names)
+        ? 'intel'
+        : 'none'
+  return cachedVendor
+}
+
+/**
+ * Moteur whisper à utiliser. Réglage `whisperEngine` : 'cuda'/'vulkan' forcent ; 'auto' (défaut)
+ * choisit selon le GPU détecté (NVIDIA → CUDA, tout le reste → Vulkan).
+ */
+export function resolveWhisperEngine(): WhisperEngine {
+  const pref = getSetting('whisperEngine')
+  if (pref === 'cuda' || pref === 'vulkan') return pref
+  return detectGpuVendor() === 'nvidia' ? 'cuda' : 'vulkan'
+}
+
+const whisperBinRoot = (): string => join(app.getPath('userData'), 'whisper-bin')
+
+// Migration : les anciennes installs ont whisper-server.exe À PLAT dans whisper-bin/ (moteur CUDA).
+// On le déplace UNE fois dans whisper-bin/cuda/ pour éviter de re-télécharger ~646 Mo.
+let migratedLegacy = false
+function migrateLegacyBin(): void {
+  if (migratedLegacy) return
+  migratedLegacy = true
+  const root = whisperBinRoot()
+  if (existsSync(join(root, 'whisper-server.exe')) && !existsSync(join(root, 'cuda', 'whisper-server.exe'))) {
+    try {
+      mkdirSync(join(root, 'cuda'), { recursive: true })
+      for (const name of readdirSync(root)) {
+        const p = join(root, name)
+        if (statSync(p).isDirectory()) continue // ne pas toucher aux sous-dossiers cuda/ vulkan/
+        renameSync(p, join(root, 'cuda', name))
+      }
+    } catch {
+      /* noop : au pire, re-téléchargement */
+    }
+  }
+}
+
+export function whisperBinDir(engine: WhisperEngine = resolveWhisperEngine()): string {
+  const d = join(whisperBinRoot(), WHISPER_ENGINES[engine].subfolder)
   if (!existsSync(d)) mkdirSync(d, { recursive: true })
   return d
 }
 
-export function whisperServerExe(): string {
-  return join(whisperBinDir(), 'whisper-server.exe')
+export function whisperServerExe(engine: WhisperEngine = resolveWhisperEngine()): string {
+  migrateLegacyBin()
+  return join(whisperBinDir(engine), 'whisper-server.exe')
 }
 
-export function isGpuBinPresent(): boolean {
-  return existsSync(whisperServerExe())
+export function isGpuBinPresent(engine: WhisperEngine = resolveWhisperEngine()): boolean {
+  return existsSync(whisperServerExe(engine))
 }
 
 /** Stream un URL vers un fichier avec progression. */
@@ -231,15 +310,17 @@ function flattenBin(dir: string): void {
   }
 }
 
-/** Télécharge + extrait le moteur GPU s'il manque. */
+/** Télécharge + extrait le moteur GPU adapté à la carte (CUDA pour NVIDIA, sinon Vulkan). */
 export async function ensureWhisperGpuBin(onProgress: (p: DownloadProgress) => void): Promise<void> {
-  if (isGpuBinPresent()) {
+  const engine = resolveWhisperEngine()
+  if (isGpuBinPresent(engine)) {
     onProgress({ kind: 'whisper-gpu', received: 1, total: 1, percent: 100, done: true })
     return
   }
-  const dir = whisperBinDir()
-  const zip = join(tmpdir(), WHISPER_GPU.file)
-  await downloadTo(WHISPER_GPU.url, zip, 'whisper-gpu', onProgress, WHISPER_GPU.approxBytes)
+  const info = WHISPER_ENGINES[engine]
+  const dir = whisperBinDir(engine)
+  const zip = join(tmpdir(), info.file)
+  await downloadTo(info.url, zip, 'whisper-gpu', onProgress, info.approxBytes)
 
   const res = spawnSync(
     'powershell',
@@ -253,6 +334,6 @@ export async function ensureWhisperGpuBin(onProgress: (p: DownloadProgress) => v
   } catch {
     /* noop */
   }
-  if (!isGpuBinPresent()) throw new Error('whisper-server.exe introuvable après extraction')
+  if (!isGpuBinPresent(engine)) throw new Error('whisper-server.exe introuvable après extraction')
   onProgress({ kind: 'whisper-gpu', received: 1, total: 1, percent: 100, done: true })
 }

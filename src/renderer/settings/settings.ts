@@ -104,14 +104,18 @@ async function renderModels(): Promise<void> {
     </div>`
   progressBars.set('llm', $('llmModel').querySelector('[data-prog]') as HTMLElement)
 
-  // ── Moteur GPU ──
-  const gpu = status.gpu as { present: boolean }
+  // ── Moteur GPU (auto : CUDA pour NVIDIA, Vulkan pour AMD/Intel) ──
+  const gpu = status.gpu as { present: boolean; engine: 'cuda' | 'vulkan'; vendor: string }
+  const eng =
+    gpu.engine === 'cuda'
+      ? { name: 'whisper.cpp CUDA', size: '~260 Mo · NVIDIA (cuBLAS)' }
+      : { name: 'whisper.cpp Vulkan', size: '~20–60 Mo · AMD / Intel' }
   $('gpuEngine').innerHTML = `
     <div class="model">
       <div class="model-head">
         <div class="model-name"><div>
-          <div>whisper.cpp CUDA</div>
-          <div class="size">~260 Mo · runtime cuBLAS inclus</div>
+          <div>${eng.name}</div>
+          <div class="size">${eng.size}</div>
         </div></div>
         <div class="control">
           <span class="badge ${gpu.present ? 'ok' : 'no'}">${gpu.present ? 'Installé' : 'Absent'}</span>
@@ -404,10 +408,12 @@ function wizardCard(containerId: string, kind: string, title: string, size: stri
 
 async function refreshWizardCards(): Promise<void> {
   const status = await v.modelsStatus()
-  const gpu = status.gpu as { present: boolean }
+  const gpu = status.gpu as { present: boolean; engine: 'cuda' | 'vulkan' }
   const llm = status.llm as { present: boolean }
   const model = (status.whisper as Array<{ id: string; present: boolean }>).find((m) => m.id === 'fr-distil-dec16')
-  wizardCard('wzGpu', 'whisper-gpu', 'Moteur GPU — whisper.cpp CUDA', '~260 Mo · recommandé', gpu.present)
+  const gpuName = gpu.engine === 'cuda' ? 'whisper.cpp CUDA (NVIDIA)' : 'whisper.cpp Vulkan (AMD/Intel)'
+  const gpuSize = gpu.engine === 'cuda' ? '~260 Mo · recommandé' : '~20–60 Mo · recommandé'
+  wizardCard('wzGpu', 'whisper-gpu', `Moteur GPU — ${gpuName}`, gpuSize, gpu.present)
   wizardCard('wzModel', 'fr-distil-dec16', 'Modèle français (bofenghuang)', '~791 Mo · optimisé FR', model?.present ?? false)
   wizardCard('wzLlm', 'llm', 'Nettoyage IA — Qwen2.5 3B', '~2 Go · optionnel', llm.present)
 }
@@ -695,6 +701,23 @@ async function init(): Promise<void> {
     })
   }
   bindToggle('useGpu', 'useGpu')
+
+  // sélecteur de carte graphique (réglages + assistant) : force le moteur whisper, ou auto-détecte
+  const bindEngineSelect = (id: string, refresh: () => void): void => {
+    const sel = document.getElementById(id) as HTMLSelectElement | null
+    if (!sel) return
+    sel.value = s.whisperEngine ?? 'auto'
+    sel.addEventListener('change', async () => {
+      await v.setSettings({ whisperEngine: sel.value as 'auto' | 'cuda' | 'vulkan' })
+      document
+        .querySelectorAll<HTMLSelectElement>('#whisperEngine, #wzWhisperEngine')
+        .forEach((e) => (e.value = sel.value)) // garde les deux sélecteurs synchro
+      refresh()
+    })
+  }
+  bindEngineSelect('whisperEngine', () => void renderModels())
+  bindEngineSelect('wzWhisperEngine', () => void refreshWizardCards())
+
   bindToggle('vadEnabled', 'vadEnabled')
   bindToggle('noiseSuppression', 'noiseSuppression')
   bindToggle('aiCleanup', 'aiCleanup')

@@ -515,8 +515,16 @@
               <div class="control"><select id="micDevice"><option value="">Par défaut</option></select></div>
             </div>
             <div class="row">
-              <div class="col"><span class="label">Accélération GPU (CUDA)</span><span class="hint">Carte NVIDIA — bien plus rapide que le CPU.</span></div>
+              <div class="col"><span class="label">Accélération GPU</span><span class="hint">Utilise le GPU (NVIDIA, AMD ou Intel) — bien plus rapide que le CPU.</span></div>
               <div class="control"><label class="switch"><input type="checkbox" id="useGpu" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Carte graphique</span><span class="hint">« Automatique » détecte ta carte. Force le moteur si la détection se trompe.</span></div>
+              <div class="control"><select id="whisperEngine">
+                <option value="auto">Automatique (détectée)</option>
+                <option value="cuda">NVIDIA — CUDA</option>
+                <option value="vulkan">AMD / Intel — Vulkan</option>
+              </select></div>
             </div>
             <div class="row">
               <div class="col"><span class="label">Anti-silence (VAD)</span><span class="hint">Coupe le silence avant l'envoi → supprime le texte fantôme.</span></div>
@@ -659,7 +667,17 @@ git hub=&gt;GitHub"></textarea>
           </div>
           <div class="wz-step" data-step="1">
             <div class="wz-title">Moteur de transcription</div>
-            <div class="wz-sub">Télécharge le moteur GPU et le modèle français. Tu peux passer et le faire plus tard.</div>
+            <div class="wz-sub">Choisis ta carte graphique, puis télécharge le moteur et le modèle. Tu peux passer et le faire plus tard.</div>
+            <div class="wz-card">
+              <div class="mic-pick" style="margin:0">
+                <span class="mic-pick-label">Carte graphique</span>
+                <select id="wzWhisperEngine">
+                  <option value="auto">Automatique (détectée)</option>
+                  <option value="cuda">NVIDIA — CUDA</option>
+                  <option value="vulkan">AMD / Intel — Vulkan</option>
+                </select>
+              </div>
+            </div>
             <div class="wz-card" id="wzGpu"></div>
             <div class="wz-card" id="wzModel"></div>
           </div>

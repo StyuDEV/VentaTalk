@@ -3,6 +3,7 @@ import Store from 'electron-store'
 export type ActivationMode = 'hold' | 'toggle'
 export type WhisperModelId = 'base' | 'small' | 'large-v3-turbo' | 'fr-distil-dec16'
 export type InjectMode = 'paste' | 'keystroke'
+export type WhisperEnginePref = 'auto' | 'cuda' | 'vulkan'
 
 export interface AppSettings {
   /** Nom de la touche (clé de HOTKEY_OPTIONS), ex. "F9". */
@@ -12,8 +13,10 @@ export interface AppSettings {
   /** "auto" ou code langue ("fr", "en", "es"...). */
   language: string
   whisperModel: WhisperModelId
-  /** Utiliser le GPU (whisper.cpp CUDA en sidecar) si le moteur GPU est installé. */
+  /** Utiliser le GPU (whisper.cpp en sidecar) si le moteur GPU est installé. */
   useGpu: boolean
+  /** Moteur whisper GPU : 'auto' (détecté selon la carte), 'cuda' (NVIDIA) ou 'vulkan' (AMD/Intel). */
+  whisperEngine: WhisperEnginePref
   /** VAD énergie ADAPTATIF côté client (dsp.ts) : coupe le silence aux bords -> anti-hallucination.
    *  (Le VAD du serveur whisper.cpp v1.9.1 est défaillant — ne pas s'y fier.) */
   vadEnabled: boolean
@@ -51,6 +54,7 @@ const defaults: AppSettings = {
   // retombe sur un autre modèle déjà téléchargé si celui-ci est absent (pas de régression).
   whisperModel: 'fr-distil-dec16',
   useGpu: true,
+  whisperEngine: 'auto',
   vadEnabled: true,
   vocabulary: '',
   noiseSuppression: false,
