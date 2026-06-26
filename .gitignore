@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+# Modèles téléchargés au runtime (jamais commités)
+models/
+*.bin
+*.gguf
+.env
+# Docs internes (assistant + process de release) — gardées en local, jamais publiées
+CLAUDE.md
+RELEASING.md

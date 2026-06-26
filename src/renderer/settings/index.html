@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+    <title>VentaTalk — Réglages</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root {
+        /* Indigo Nuit — palette nommée */
+        --ink: #0a0b12;        /* fond app (le plus profond) */
+        --slate: #0f1018;      /* sidebar */
+        --surface: #151723;    /* cartes */
+        --surface-2: #1c1f30;  /* champs / survol */
+        --line: #232739;       /* bordures discrètes */
+        --line-2: #313655;     /* bordures accentuées */
+        --text: #e9eaf4;
+        --muted: #969bbd;
+        --dim: #61678c;
+        --accent: #6366f1;
+        --accent-2: #818cf8;
+        --accent-hi: #7376f5;  /* survol des actions principales (sans glow) */
+        --accent-wash: rgba(99, 102, 241, 0.12);
+        --warn: #e0a44b;
+        --cyan: #22d3ee;
+        --danger: #ef4444;
+        --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+        --ui: -apple-system, "Segoe UI", system-ui, sans-serif;
+        --ease: cubic-bezier(0.32, 0.72, 0, 1); /* ease-out doux façon Linear/Apple */
+      }
+      html { background: var(--ink); }
+      body {
+        font-family: var(--ui); color: var(--text); background: var(--ink);
+        font-size: 14px; line-height: 1.5; height: 100vh; overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── animations (sobres : courtes, douces, un seul mouvement, sans rebond) ── */
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes pageIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+      @keyframes slideFromRight { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+      @keyframes slideFromLeft { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+      @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      /* NB : on NE respecte volontairement PAS prefers-reduced-motion ici — Windows a souvent
+         "Effets d'animation" coupé, ce qui couperait toutes nos animations (demande explicite
+         de l'utilisateur de les garder). Les animations restent courtes et sobres. */
+
+      /* ── barre de défilement ── */
+      ::-webkit-scrollbar { width: 12px; height: 12px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: #2a2f47; border-radius: 999px;
+        border: 3px solid transparent; background-clip: padding-box;
+      }
+      ::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+
+      /* ── coquille ── */
+      .app { display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+
+      /* barre de titre custom : bande de drag (les contrôles min/agrandir/fermer sont
+         dessinés par Windows via titleBarOverlay, en haut à droite). */
+      .titlebar { position: fixed; top: 0; left: 0; right: 0; height: 36px; -webkit-app-region: drag; z-index: 5; }
+      /* sécurité : aucun élément interactif ne doit être en zone de drag */
+      button, select, input, textarea, a, .nav-item, .switch, .seg label, .icon-btn, .presets label { -webkit-app-region: no-drag; }
+
+      /* ── sidebar ── */
+      .sidebar {
+        background: var(--slate); border-right: 1px solid var(--line);
+        display: flex; flex-direction: column; padding: 22px 14px 14px;
+      }
+      .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 22px; }
+      .brand-mark { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 3px rgba(99, 102, 241, 0.28)); }
+      .brand-name { display: flex; flex-direction: column; line-height: 1.15; }
+      .brand-name b { font-size: 15.5px; font-weight: 700; letter-spacing: -0.2px; }
+      .brand-name span { font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 0.5px; }
+
+      .nav { display: flex; flex-direction: column; gap: 2px; }
+      .nav-item {
+        display: flex; align-items: center; gap: 11px; width: 100%;
+        padding: 10px 12px; border: none; border-radius: 10px; cursor: pointer;
+        background: transparent; color: var(--muted); font: inherit; font-size: 13.5px; font-weight: 500;
+        position: relative; text-align: left; transition: background 0.16s var(--ease), color 0.16s var(--ease);
+      }
+      .nav-item svg { width: 18px; height: 18px; flex: none; opacity: 0.85; }
+      .nav-item:hover { background: var(--surface-2); color: var(--text); }
+      .nav-item.active { background: var(--accent-wash); color: var(--accent-2); }
+      .nav-item.active::before {
+        content: ""; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+        width: 3px; height: 18px; border-radius: 999px; background: var(--accent);
+      }
+
+      .side-foot { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+      .ver { display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+      .icon-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+        background: transparent; border: 1px solid transparent; color: var(--muted); transition: 0.15s;
+      }
+      .icon-btn svg { width: 15px; height: 15px; }
+      .icon-btn:hover { background: var(--surface-2); color: var(--accent-2); border-color: var(--line); }
+
+      /* ── contenu ── */
+      .content { overflow-y: auto; padding: 30px 36px 56px; }
+
+      /* ── écran PLEIN « mise à jour en cours » (prend toute la fenêtre) ── */
+      #updateScreen {
+        position: fixed; inset: 0; z-index: 80; display: none;
+        flex-direction: column; align-items: center; justify-content: center;
+        padding: 48px; text-align: center; overflow: hidden;
+        background: radial-gradient(120% 95% at 50% -10%, #1a1f3d 0%, var(--ink) 58%);
+      }
+      #updateScreen.show { display: flex; animation: fadeIn 0.28s ease; }
+      .us-drag { position: absolute; top: 0; left: 0; right: 0; height: 40px; -webkit-app-region: drag; }
+      .us-inner { position: relative; display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 420px; animation: pageIn 0.45s var(--ease) both; }
+      .us-glow { position: absolute; top: -50px; width: 300px; height: 300px; border-radius: 50%; pointer-events: none;
+        background: radial-gradient(circle, rgba(99, 102, 241, 0.32), transparent 68%); filter: blur(8px); animation: usPulse 3.2s ease-in-out infinite; }
+      .us-mark { position: relative; margin-bottom: 26px; height: 64px; display: flex; align-items: flex-end; gap: 7px; }
+      .us-wave { width: 7px; border-radius: 999px; background: linear-gradient(180deg, var(--accent-2), var(--accent)); transform-origin: bottom; animation: usWave 1.1s ease-in-out infinite; }
+      .us-wave:nth-child(1) { height: 22px; animation-delay: 0s; }
+      .us-wave:nth-child(2) { height: 42px; animation-delay: 0.12s; }
+      .us-wave:nth-child(3) { height: 60px; animation-delay: 0.24s; }
+      .us-wave:nth-child(4) { height: 42px; animation-delay: 0.36s; }
+      .us-wave:nth-child(5) { height: 22px; animation-delay: 0.48s; }
+      .us-title { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; }
+      .us-sub { color: var(--muted); font-size: 13.5px; margin-top: 9px; line-height: 1.5; }
+      .us-track { position: relative; width: 100%; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); margin: 32px 0 13px; overflow: hidden; }
+      .us-fill { height: 100%; width: 0%; border-radius: 999px; position: relative; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.35s var(--ease); }
+      .us-fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent); animation: usShimmer 1.5s linear infinite; }
+      .us-pct { font-family: var(--mono); font-size: 13px; color: var(--accent-2); }
+      .us-actions { margin-top: 28px; display: none; }
+      .us-actions button { padding: 12px 24px; font-size: 14px; }
+      /* états */
+      #updateScreen.ready .us-track, #updateScreen.ready .us-pct { display: none; }
+      #updateScreen.ready .us-actions { display: block; }
+      #updateScreen.installing .us-pct, #updateScreen.installing .us-actions { display: none; }
+      #updateScreen.installing .us-fill { width: 36% !important; animation: usIndet 1.15s ease-in-out infinite; }
+      @keyframes usWave { 0%, 100% { transform: scaleY(0.45); opacity: 0.55; } 50% { transform: scaleY(1); opacity: 1; } }
+      @keyframes usPulse { 0%, 100% { opacity: 0.5; transform: scale(0.95); } 50% { opacity: 0.9; transform: scale(1.06); } }
+      @keyframes usShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+      @keyframes usIndet { 0% { transform: translateX(-130%); } 100% { transform: translateX(360%); } }
+      .panel { display: none; max-width: 600px; }
+      .panel.active { display: block; animation: pageIn 0.26s var(--ease) both; }
+      .panel-head { margin-bottom: 22px; }
+      .panel-head h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
+      .panel-head p { color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+      .group-label {
+        font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px;
+        color: var(--dim); margin: 22px 2px 9px; font-weight: 600;
+      }
+      .group-label:first-of-type { margin-top: 0; }
+      .card {
+        background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+        padding: 2px 16px; transition: border-color 0.2s;
+      }
+      .card:hover { border-color: var(--line-2); }
+
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 0; min-height: 52px; }
+      .row + .row { border-top: 1px solid var(--line); }
+      .row .label { font-weight: 500; font-size: 14px; }
+      .row .hint { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 360px; }
+      .row .control { flex: none; display: flex; align-items: center; gap: 8px; }
+      .col { display: flex; flex-direction: column; }
+      .stack { display: flex; flex-direction: column; gap: 9px; padding: 14px 0; }
+
+      /* ── champs ── */
+      select {
+        appearance: none; -webkit-appearance: none;
+        background-color: var(--surface-2); color: var(--text);
+        border: 1px solid var(--line-2); border-radius: 9px;
+        padding: 8px 32px 8px 12px; font: inherit; font-size: 13px; cursor: pointer;
+        width: 210px; text-overflow: ellipsis;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23969bbd' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 11px center;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      select:hover { border-color: var(--accent); }
+      select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+
+      textarea {
+        background: var(--surface-2); color: var(--text);
+        border: 1px solid var(--line-2); border-radius: 10px;
+        padding: 10px 12px; font: inherit; font-size: 13px; resize: vertical; width: 100%; line-height: 1.5;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+      textarea::placeholder { color: var(--dim); }
+
+      button {
+        background: var(--surface-2); color: var(--text);
+        border: 1px solid var(--line-2); border-radius: 9px;
+        padding: 8px 13px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+        transition: transform 0.12s, background 0.15s, border-color 0.15s, box-shadow 0.2s;
+      }
+      button:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-1px); }
+      button:active:not(:disabled) { transform: translateY(0); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.accent { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+      button.accent:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+      button.ghost-danger { color: #f9a8a8; border-color: rgba(239, 68, 68, 0.4); }
+      button.ghost-danger:hover:not(:disabled) { border-color: var(--danger); transform: translateY(-1px); }
+
+      /* ── interrupteur ── */
+      .switch { position: relative; width: 42px; height: 24px; flex: none; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; inset: 0; background: #3c4166; border-radius: 999px; transition: background 0.2s var(--ease); cursor: pointer; }
+      .slider::before {
+        content: ""; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px;
+        background: #fff; border-radius: 50%; transition: transform 0.22s var(--ease);
+      }
+      .switch input:checked + .slider { background: var(--accent); }
+      .switch input:checked + .slider::before { transform: translateX(18px); }
+
+      /* ── contrôle segmenté (indicateur coulissant) ── */
+      .seg { position: relative; display: inline-flex; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 10px; padding: 3px; gap: 2px; }
+      .seg-ind {
+        position: absolute; top: 3px; bottom: 3px; left: 3px; width: 0; border-radius: 7px;
+        background: var(--accent); z-index: 0; pointer-events: none;
+        transition: left 0.26s var(--ease), width 0.26s var(--ease);
+      }
+      .seg label { cursor: pointer; position: relative; z-index: 1; }
+      .seg input { position: absolute; opacity: 0; pointer-events: none; }
+      .seg span {
+        display: block; padding: 6px 13px; border-radius: 7px; font-size: 12.5px; color: var(--muted);
+        transition: color 0.2s;
+      }
+      .seg input:checked + span { color: #fff; }
+      .seg label:hover span { color: var(--text); }
+      .seg input:checked + span { color: #fff; }
+
+      .kbd {
+        background: var(--surface-2); border: 1px solid var(--accent); border-radius: 7px;
+        padding: 6px 12px; font-family: var(--mono); font-size: 12.5px; color: var(--accent-2);
+        min-width: 56px; text-align: center; display: inline-block; font-weight: 600;
+      }
+      .kbd.capturing { border-color: var(--cyan); color: var(--cyan); }
+      .presets { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+      .presets label {
+        background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+        padding: 5px 9px; font-size: 12px; cursor: pointer; color: var(--muted); transition: 0.15s;
+      }
+      .presets label:hover { border-color: var(--accent); color: var(--text); }
+
+      /* ── cartes de modèle ── */
+      .model { padding: 13px 0; }
+      .model + .model { border-top: 1px solid var(--line); }
+      .model-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .model-name { display: flex; align-items: center; gap: 10px; }
+      .model-name > div > div:first-child { font-size: 13.5px; font-weight: 500; }
+      .size { color: var(--dim); font-family: var(--mono); font-size: 11px; margin-top: 2px; }
+      .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+      .badge.ok { background: var(--accent-wash); color: var(--accent-2); }
+      .badge.ok::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+      .badge.no { background: rgba(150, 155, 189, 0.12); color: var(--dim); }
+      .progress { height: 5px; background: var(--surface-2); border-radius: 999px; margin-top: 10px; overflow: hidden; display: none; }
+      .progress.show { display: block; }
+      .progress > i { display: block; height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width 0.2s; }
+      input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
+      /* ── historique ── */
+      .hist-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 26px; margin-bottom: 12px; }
+      .hist-actions { display: flex; align-items: center; gap: 10px; }
+      .hist-empty { color: var(--dim); font-size: 13px; padding: 18px; text-align: center; border: 1px dashed var(--line-2); border-radius: 12px; }
+      .hist-notice {
+        display: flex; align-items: center; gap: 9px; background: rgba(224, 164, 75, 0.1);
+        border: 1px solid rgba(224, 164, 75, 0.32); color: var(--warn); border-radius: 10px;
+        padding: 10px 13px; font-size: 12.5px; margin-bottom: 12px; line-height: 1.4;
+      }
+      .hist-notice svg { width: 16px; height: 16px; flex: none; }
+      .hist-item {
+        background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+        padding: 11px 13px; margin-top: 9px; animation: rise 0.3s both; transition: border-color 0.15s, transform 0.15s;
+      }
+      .hist-item:hover { border-color: var(--line-2); transform: translateY(-1px); }
+      .hist-text { font-size: 13.5px; line-height: 1.5; word-break: break-word; }
+      .hist-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; }
+      .hist-time { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+      .hist-btns { display: flex; gap: 6px; }
+      .hist-btns button { padding: 5px 10px; font-size: 12px; }
+
+      /* ── toast ── */
+      #toast {
+        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(90px);
+        background: var(--accent); color: #fff; padding: 10px 18px; border-radius: 10px;
+        font-size: 13px; font-weight: 600; transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+        max-width: 90%; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4); z-index: 60;
+      }
+      #toast.show { transform: translateX(-50%) translateY(0); }
+
+      /* ── assistant 1er lancement (centré, animé) ── */
+      #onboarding {
+        position: fixed; inset: 0; background: var(--ink); z-index: 50;
+        display: none; align-items: center; justify-content: center; padding: 52px 40px 36px; overflow-y: auto;
+      }
+      #onboarding.show { display: flex; animation: fadeIn 0.3s ease; }
+      .wz-drag { position: absolute; top: 0; left: 0; right: 0; height: 36px; -webkit-app-region: drag; }
+      .wz { width: 100%; max-width: 470px; display: flex; flex-direction: column; animation: fadeIn 0.32s ease both; }
+      .wz-top { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+      .wz-top .brand-mark { width: 26px; height: 26px; }
+      .wz-top b { font-size: 14px; }
+      .wz-steps { display: flex; gap: 7px; margin-bottom: 28px; }
+      .wz-dot { flex: 1; height: 4px; border-radius: 999px; background: var(--surface-2); transition: background 0.4s; }
+      .wz-dot.on { background: var(--accent); }
+      .wz-body { position: relative; }
+      .wz-step { display: none; }
+      .wz-step.on { display: block; animation: fadeIn 0.3s ease both; }
+      /* glissement directionnel entre étapes (Continuer = depuis la droite, Retour = depuis la gauche) */
+      .wz-body.fwd .wz-step.on { animation: slideFromRight 0.34s var(--ease) both; }
+      .wz-body.bwd .wz-step.on { animation: slideFromLeft 0.34s var(--ease) both; }
+      .wz-title { font-size: 25px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 7px; }
+      .wz-sub { color: var(--muted); font-size: 14px; margin-bottom: 22px; line-height: 1.55; }
+      .wz-card { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 15px 16px; margin-bottom: 11px; transition: border-color 0.2s; }
+      .wz-card:hover { border-color: var(--line-2); }
+      .wz-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 20px; }
+      .wz-nav .right { display: flex; gap: 8px; }
+      .link { background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; padding: 8px 6px; transition: color 0.15s; }
+      .link:hover { color: var(--text); }
+      .ok-pill { font-size: 12px; color: var(--accent-2); display: none; align-items: center; gap: 5px; }
+      .ok-pill.show { display: inline-flex; }
+      /* test micro (détection live) */
+      .mic-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      .mic-meter { height: 8px; background: var(--surface-2); border-radius: 999px; margin-top: 14px; overflow: hidden; opacity: 0; transition: opacity 0.25s var(--ease); }
+      .mic-meter.on { opacity: 1; }
+      .mic-level { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.07s linear; }
+      .mic-status.ok { color: var(--accent-2); }
+      .mic-status.err { color: var(--warn); }
+
+      /* ── changelog (nouveautés après mise à jour) ── */
+      #changelog {
+        position: fixed; inset: 0; background: rgba(6, 7, 14, 0.72); z-index: 55;
+        display: none; align-items: center; justify-content: center; padding: 40px;
+      }
+      #changelog.show { display: flex; animation: fadeIn 0.25s ease; }
+      .cl-card {
+        width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--line-2);
+        border-radius: 16px; padding: 24px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+        animation: pageIn 0.3s var(--ease) both;
+      }
+      .cl-emoji { font-size: 26px; }
+      .cl-title { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 2px; }
+      .cl-ver { font-family: var(--mono); font-size: 12px; color: var(--accent-2); margin-bottom: 18px; }
+      .cl-list { list-style: none; display: flex; flex-direction: column; gap: 11px; margin-bottom: 22px; }
+      .cl-list li { display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45; }
+      .cl-list li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 6px; }
+      .cl-actions { display: flex; justify-content: flex-end; }
+      /* ── historique des versions (toutes les notes) ── */
+      #histLog {
+        position: fixed; inset: 0; background: rgba(6, 7, 14, 0.72); z-index: 55;
+        display: none; align-items: center; justify-content: center; padding: 40px;
+      }
+      #histLog.show { display: flex; animation: fadeIn 0.25s ease; }
+      .hl-scroll { max-height: 56vh; overflow-y: auto; margin: 14px 0 20px; padding-right: 6px; }
+      .hl-ver { font-family: var(--mono); font-size: 12px; color: var(--accent-2); margin: 18px 0 8px; }
+      .hl-ver:first-child { margin-top: 0; }
+      .hl-scroll ul { list-style: none; display: flex; flex-direction: column; gap: 9px; margin: 0; padding: 0; }
+      .hl-scroll li { display: flex; gap: 10px; font-size: 13px; line-height: 1.45; }
+      .hl-scroll li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 6px; }
+    </style>
+  </head>
+  <body class="playing">
+    <div class="titlebar"></div>
+    <div class="app">
+      <!-- ───────── barre latérale ───────── -->
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="160 282 704 460" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <linearGradient id="hbar" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#a5b4fc" /><stop offset="1" stop-color="#4f46e5" />
+              </linearGradient>
+            </defs>
+            <g fill="url(#hbar)">
+              <rect x="160" y="420" width="96" height="184" rx="48" />
+              <rect x="312" y="356" width="96" height="312" rx="48" />
+              <rect x="464" y="282" width="96" height="460" rx="48" />
+              <rect x="616" y="356" width="96" height="312" rx="48" />
+              <rect x="768" y="420" width="96" height="184" rx="48" />
+            </g>
+          </svg>
+          <div class="brand-name"><b>VentaTalk</b><span>dictée locale</span></div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button class="nav-item" data-nav="general">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg>
+            Général
+          </button>
+          <button class="nav-item active" data-nav="dictee">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18.5V21"/></svg>
+            Dictée
+          </button>
+          <button class="nav-item" data-nav="transcription">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
+            Transcription
+          </button>
+          <button class="nav-item" data-nav="ia">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.1L18 9l-4.3 1.9L12 15l-1.7-4.1L6 9l4.3-1.9z"/><path d="M18.5 14l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></svg>
+            Intelligence
+          </button>
+          <button class="nav-item" data-nav="historique">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 12a8.8 8.8 0 1 0 2.8-6.5L3 8"/><path d="M3 3.5V8h4.5"/><path d="M12 7.5V12l3 1.8"/></svg>
+            Historique
+          </button>
+        </nav>
+
+        <div class="side-foot">
+          <div class="ver">
+            <span id="appVer">v0.1.0</span>
+            <button class="icon-btn" id="checkUpdate" title="Vérifier les mises à jour">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 0 1 14.3-6.2L21 8"/><path d="M21 3.5V8h-4.5"/><path d="M20.5 12a8.5 8.5 0 0 1-14.3 6.2L3 16"/><path d="M3 20.5V16h4.5"/></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ───────── contenu ───────── -->
+      <main class="content">
+        <!-- Dictée -->
+        <section class="panel active" data-panel="dictee">
+          <div class="panel-head"><h1>Dictée</h1><p>Comment déclencher la dictée et écrire ta voix.</p></div>
+          <div class="group-label">Activation</div>
+          <div class="card">
+            <div class="row">
+              <div class="col">
+                <span class="label">Raccourci</span>
+                <span class="hint">Maintiens cette combinaison pour dicter.</span>
+              </div>
+              <div class="control"><span id="hotkeyDisplay" class="kbd">F9</span><button id="hotkeyCapture">Changer…</button></div>
+            </div>
+            <div class="row">
+              <span class="hint">Raccourcis rapides</span>
+              <div class="control"><div class="presets" id="hotkeyPresets"></div></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Mode</span><span class="hint">Maintenir, ou appuyer pour basculer.</span></div>
+              <div class="control">
+                <div class="seg">
+                  <label><input type="radio" name="mode" value="hold" /><span>Maintenir</span></label>
+                  <label><input type="radio" name="mode" value="toggle" /><span>Appuyer</span></label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-label">Écriture</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Méthode d'écriture</span><span class="hint">« Coller » est rapide ; « Frappe » marche dans les terminaux.</span></div>
+              <div class="control">
+                <div class="seg">
+                  <label><input type="radio" name="inject" value="paste" /><span>Coller</span></label>
+                  <label><input type="radio" name="inject" value="keystroke" /><span>Frappe</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Garder dans le presse-papiers</span><span class="hint">La dictée reste copiée après écriture (filet anti-perte).</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="keepOnClipboard" /><span class="slider"></span></label></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Transcription -->
+        <section class="panel" data-panel="transcription">
+          <div class="panel-head"><h1>Transcription</h1><p>Le moteur Whisper qui convertit ta voix en texte, 100% en local.</p></div>
+          <div class="group-label">Réglages</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Langue</span><span class="hint">« Auto » détecte la langue parlée.</span></div>
+              <div class="control"><select id="language"></select></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Microphone</span><span class="hint">Périphérique d'entrée pour la dictée.</span></div>
+              <div class="control"><select id="micDevice"><option value="">Par défaut</option></select></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Accélération GPU (CUDA)</span><span class="hint">Carte NVIDIA — bien plus rapide que le CPU.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="useGpu" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Anti-silence (VAD)</span><span class="hint">Coupe le silence avant l'envoi → supprime le texte fantôme.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="vadEnabled" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Réduction de bruit micro</span><span class="hint">À activer seulement en environnement bruyant.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="noiseSuppression" /><span class="slider"></span></label></div>
+            </div>
+          </div>
+
+          <div class="group-label">Moteur GPU</div>
+          <div class="card"><div id="gpuEngine"></div></div>
+
+          <div class="group-label">Modèles Whisper</div>
+          <div class="card"><div id="whisperModels"></div></div>
+        </section>
+
+        <!-- Intelligence -->
+        <section class="panel" data-panel="ia">
+          <div class="panel-head"><h1>Intelligence</h1><p>Nettoyage du texte et vocabulaire — un LLM local, rien n'est envoyé en ligne.</p></div>
+          <div class="group-label">Nettoyage IA</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Nettoyer le texte</span><span class="hint">Enlève les « euh », ponctue, corrige (LLM local).</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="aiCleanup" /><span class="slider"></span></label></div>
+            </div>
+            <div id="llmModel"></div>
+          </div>
+
+          <div class="group-label">Vocabulaire &amp; corrections</div>
+          <div class="card">
+            <div class="stack">
+              <span class="hint">Noms propres / jargon (biaise Whisper et le nettoyage IA)</span>
+              <textarea id="vocabulary" rows="2" placeholder="VentaTalk, Whisper, GitHub, Qwen, TypeScript"></textarea>
+            </div>
+            <div class="stack" style="border-top:1px solid var(--line)">
+              <span class="hint">Remplacements — un par ligne, format « faux=&gt;correct »</span>
+              <textarea id="replacements" rows="3" placeholder="quoine=&gt;Qwen
+git hub=&gt;GitHub"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <!-- Historique -->
+        <section class="panel" data-panel="historique">
+          <div class="panel-head"><h1>Historique</h1><p>Tes 30 dernières dictées, conservées localement.</p></div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Conserver l'historique</span><span class="hint">Désactive pour ne plus rien enregistrer.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="keepHistory" /><span class="slider"></span></label></div>
+            </div>
+          </div>
+          <div class="hist-head">
+            <span class="group-label" style="margin:0">Dictées récentes</span>
+            <button id="historyClear" class="ghost-danger">Tout effacer</button>
+          </div>
+          <div id="historyList"></div>
+        </section>
+
+        <!-- Général -->
+        <section class="panel" data-panel="general">
+          <div class="panel-head"><h1>Général</h1><p>Démarrage, retours sonores et mises à jour.</p></div>
+          <div class="group-label">Confort</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Lancer au démarrage</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="launchAtLogin" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Son de confirmation</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="soundFeedback" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Couper le son du PC pendant la dictée</span><span class="hint">Mute la sortie audio quand tu parles, puis la restaure.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="muteWhileDictating" /><span class="slider"></span></label></div>
+            </div>
+          </div>
+
+          <div class="group-label">Application</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Assistant de configuration</span><span class="hint">Revoir les étapes (moteur GPU, modèle, raccourci).</span></div>
+              <div class="control"><button id="onboardingReplay">Revoir</button></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Mises à jour</span><span class="hint">Disponibles dans la version installée.</span></div>
+              <div class="control"><button id="checkUpdate2">Vérifier maintenant</button></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Notes de version</span><span class="hint">Les nouveautés de la version installée.</span></div>
+              <div class="control"><button id="showChangelog">Voir</button></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Historique des versions</span><span class="hint">Toutes les nouveautés des versions précédentes.</span></div>
+              <div class="control"><button id="showHistory">Voir tout</button></div>
+            </div>
+            <div class="row" id="previewUpdateRow" style="display:none">
+              <div class="col"><span class="label">Aperçu mise à jour</span><span class="hint">Test local de l’écran de mise à jour (dev).</span></div>
+              <div class="control"><button id="previewUpdate">Aperçu</button></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- Assistant de premier lancement -->
+    <div id="onboarding">
+      <div class="wz-drag"></div>
+      <div class="wz">
+        <div class="wz-top">
+          <svg class="brand-mark" viewBox="160 282 704 460" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <g fill="url(#hbar)">
+              <rect x="160" y="420" width="96" height="184" rx="48" /><rect x="312" y="356" width="96" height="312" rx="48" />
+              <rect x="464" y="282" width="96" height="460" rx="48" /><rect x="616" y="356" width="96" height="312" rx="48" />
+              <rect x="768" y="420" width="96" height="184" rx="48" />
+            </g>
+          </svg>
+          <b>VentaTalk</b>
+        </div>
+        <div class="wz-steps">
+          <div class="wz-dot" data-dot="0"></div><div class="wz-dot" data-dot="1"></div><div class="wz-dot" data-dot="2"></div>
+        </div>
+        <div class="wz-body">
+          <div class="wz-step" data-step="0">
+            <div class="wz-title">Teste ton micro</div>
+            <div class="wz-sub">Dictée vocale 100% locale et privée. Vérifions d'abord que ton micro est bien détecté.</div>
+            <div class="wz-card">
+              <div class="mic-row">
+                <div class="model-name"><div><div>Micro</div><div class="size mic-status" id="micStatus">Clique sur « Tester » et parle — on mesure le signal en direct.</div></div></div>
+                <button id="wzMicTest" class="accent">Tester</button>
+              </div>
+              <div class="mic-meter" id="micMeter"><div class="mic-level" id="micLevel"></div></div>
+            </div>
+          </div>
+          <div class="wz-step" data-step="1">
+            <div class="wz-title">Moteur de transcription</div>
+            <div class="wz-sub">Télécharge le moteur GPU et le modèle français. Tu peux passer et le faire plus tard.</div>
+            <div class="wz-card" id="wzGpu"></div>
+            <div class="wz-card" id="wzModel"></div>
+          </div>
+          <div class="wz-step" data-step="2">
+            <div class="wz-title">Confort</div>
+            <div class="wz-sub">Le nettoyage IA est optionnel. Choisis ton raccourci, puis c'est parti.</div>
+            <div class="wz-card" id="wzLlm"></div>
+            <div class="wz-card">
+              <div class="model-head">
+                <div class="model-name"><div><div>Raccourci de dictée</div><div class="size">Maintiens-le pour parler.</div></div></div>
+                <div class="control"><span id="wzHotkey" class="kbd">F9</span><button id="wzHotkeyCapture">Changer…</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="wz-nav">
+          <button class="link" id="wzBack">‹ Retour</button>
+          <div class="right"><button class="link" id="wzSkip">Passer</button><button class="accent" id="wzNext">Continuer</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nouveautés (changelog), affiché après une mise à jour ou via « Notes de version » -->
+    <div id="changelog">
+      <div class="cl-card">
+        <div class="cl-title">Nouveautés</div>
+        <div class="cl-ver" id="clVer"></div>
+        <ul class="cl-list" id="clList"></ul>
+        <div class="cl-actions"><button class="accent" id="clClose">Super&nbsp;!</button></div>
+      </div>
+    </div>
+
+    <!-- Écran PLEIN « mise à jour en cours » — prend toute la fenêtre -->
+    <div id="updateScreen">
+      <div class="us-drag"></div>
+      <div class="us-inner">
+        <div class="us-glow"></div>
+        <div class="us-mark">
+          <span class="us-wave"></span><span class="us-wave"></span><span class="us-wave"></span><span class="us-wave"></span><span class="us-wave"></span>
+        </div>
+        <div class="us-title" id="usTitle">Mise à jour en cours…</div>
+        <div class="us-sub" id="usSub">Téléchargement de la nouvelle version</div>
+        <div class="us-track"><div class="us-fill" id="usFill"></div></div>
+        <div class="us-pct" id="usPct">0 %</div>
+        <div class="us-actions"><button class="accent" id="usInstall">Redémarrer &amp; installer</button></div>
+      </div>
+    </div>
+
+    <!-- Historique complet des versions (toutes les notes) -->
+    <div id="histLog">
+      <div class="cl-card">
+        <div class="cl-title">Historique des versions</div>
+        <div class="hl-scroll" id="hlList"></div>
+        <div class="cl-actions"><button class="accent" id="hlClose">Fermer</button></div>
+      </div>
+    </div>
+
+    <script type="module" src="./settings.ts"></script>
+  </body>
+</html>

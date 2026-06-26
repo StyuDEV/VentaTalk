@@ -1,0 +1,54 @@
+appId: com.ventatalk.app
+productName: VentaTalk
+copyright: Copyright © 2026 VentaTalk
+directories:
+  buildResources: resources
+  output: dist
+# Auto-update (electron-updater). À RENSEIGNER avant de publier : remplace owner/repo par
+# ton dépôt GitHub de releases. Tant qu'aucune release n'est publiée, l'updater échoue en
+# silence (géré dans src/main/updater.ts) et n'impacte ni le dev ni le build local.
+# Publier : `set GH_TOKEN=...` puis `npm run dist -- --publish always`.
+publish:
+  provider: github
+  owner: StyuDEV
+  repo: VentaTalk
+  releaseType: release
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  # Allègement (~580 Mo) : on exclut les backends GPU CUDA du LLM (node-llama-cpp). Le nettoyage
+  # IA tourne sur Vulkan (compatible NVIDIA/AMD/Intel) — perf identique pour un texte court, et
+  # whisper (la transcription) utilise son PROPRE moteur CUDA, donc NON concerné. win-arm64 inutile.
+  - "!node_modules/@node-llama-cpp/win-x64-cuda/**"
+  - "!node_modules/@node-llama-cpp/win-x64-cuda-ext/**"
+  - "!node_modules/@node-llama-cpp/win-arm64/**"
+# Les binaires natifs ne doivent JAMAIS être empaquetés dans l'archive asar :
+# ils ont besoin de leur structure de fichiers d'origine au runtime (sinon crash).
+asarUnpack:
+  - "**/*.node"
+  - "node_modules/smart-whisper/**"
+  - "node_modules/node-llama-cpp/**"
+  - "node_modules/@node-llama-cpp/**"
+  - "node_modules/uiohook-napi/**"
+  - "node_modules/@nut-tree-fork/**"
+# Les modules natifs sont tous N-API / prebuilds (ABI-stable sous Electron) : pas de
+# rebuild nécessaire. On le désactive car node-gyp ne sait pas compiler dans un chemin
+# contenant des espaces.
+npmRebuild: false
+nodeGypRebuild: false
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+nsis:
+  # Nom SANS espaces : évite que GitHub renomme l'asset (espaces → points) et casse
+  # l'auto-update (le latest.yml attend des tirets). Garde un nommage cohérent partout.
+  artifactName: ${productName}-Setup-${version}.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
