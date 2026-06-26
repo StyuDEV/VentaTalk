@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, session, clipboard, Notification, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, session, clipboard, Notification } from 'electron'
 import { join, dirname } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -11,7 +11,14 @@ import {
   type WhisperModelId,
   type AppSettings
 } from './settings'
-import { startHotkey, stopHotkey, setHotkey, setActivationMode, captureHotkey } from './hotkey'
+import {
+  startHotkey,
+  stopHotkey,
+  setHotkey,
+  setActivationMode,
+  captureHotkey,
+  resetActivation
+} from './hotkey'
 import { createTray, rebuildTrayMenu, destroyTray } from './tray'
 import {
   WHISPER_MODELS,
@@ -104,6 +111,9 @@ let isQuitting = false
 
 type PipelineState = 'idle' | 'recording' | 'processing'
 let state: PipelineState = 'idle'
+// Génération de dictée : incrémentée à chaque début ET à chaque annulation (Échap). runPipeline
+// capture sa génération au départ et abandonne si elle a changé entre-temps (dictée annulée).
+let dictationGen = 0
 // Une MAJ est devenue prête pendant une dictée : on amènera l'écran de MAJ au premier plan dès que
 // le pipeline revient à l'idle (pour ne pas voler le focus de l'app cible en pleine dictée).
 let pendingUpdateReveal = false
@@ -248,6 +258,7 @@ function onRecordStart(): void {
     openSettings()
     return
   }
+  dictationGen++ // nouvelle dictée (toute génération antérieure devient obsolète)
   state = 'recording'
   showOverlay()
   sendOverlay('record:start')
@@ -279,13 +290,33 @@ function onRecordStop(): void {
   sendOverlay('record:stop') // l'overlay renverra ensuite 'audio:data'
 }
 
+/**
+ * Annule la dictée en cours (touche Échap). Coupe la capture si on enregistrait, et invalide le
+ * pipeline si on était déjà en traitement (via dictationGen). Rend l'app à l'état idle proprement.
+ */
+function cancelDictation(): void {
+  if (state === 'idle') return
+  dictationGen++ // invalide tout runPipeline en cours (il abandonnera avant d'injecter)
+  muteArmed = false
+  restoreSystemAudio()
+  // Pas de son ici : l'annulation est volontaire (un buzzer d'erreur induirait en erreur) ;
+  // la sortie visuelle de la barre (overlay -> idle) sert de retour.
+  resetActivation() // évite qu'un toggle reste "armé" après l'annulation
+  sendOverlay('record:cancel') // l'overlay stoppe la capture SANS renvoyer l'audio
+  state = 'idle'
+  hideOverlay()
+  sendOverlay('state', 'idle')
+}
+
 async function runPipeline(pcm: Float32Array): Promise<void> {
   if (state !== 'processing') return
+  const gen = dictationGen // capture la génération : si elle change, la dictée a été annulée
   const s = getSettings()
   try {
     const backend = await ensureEngine(engineConfig())
     notifyBackend(backend)
     let text = await transcribe(pcm, s.language)
+    if (gen !== dictationGen) return // annulée pendant la transcription
 
     // Passe déterministe : retire euh/hum/bégaiements MÊME sans LLM (texte propre par défaut).
     if (text) text = stripDisfluencies(text)
@@ -305,6 +336,7 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
         /* on garde le texte brut si le nettoyage échoue */
       }
     }
+    if (gen !== dictationGen) return // annulée pendant le nettoyage LLM
 
     if (text) {
       lastTranscript = text
@@ -318,17 +350,22 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
       //  l'overlay reste visible "Transcription…" puis sort à l'état idle dans finally)
     }
   } catch (err) {
+    if (gen !== dictationGen) return // annulée : on ne signale pas l'erreur
     playSound('error')
     toast('Erreur de transcription : ' + (err instanceof Error ? err.message : String(err)))
   } finally {
-    restoreSystemAudio() // filet : normalement déjà rétabli au record:stop
-    state = 'idle'
-    hideOverlay()
-    sendOverlay('state', 'idle')
-    if (pendingUpdateReveal) {
-      // Une MAJ est devenue prête pendant cette dictée : on la montre maintenant (in-app).
-      pendingUpdateReveal = false
-      openSettings()
+    // Si la dictée a été annulée entre-temps, cancelDictation a déjà tout remis à idle : ne pas
+    // ré-toucher l'état (une nouvelle dictée a peut-être déjà démarré).
+    if (gen === dictationGen) {
+      restoreSystemAudio() // filet : normalement déjà rétabli au record:stop
+      state = 'idle'
+      hideOverlay()
+      sendOverlay('state', 'idle')
+      if (pendingUpdateReveal) {
+        // Une MAJ est devenue prête pendant cette dictée : on la montre maintenant (in-app).
+        pendingUpdateReveal = false
+        openSettings()
+      }
     }
   }
 }
@@ -420,25 +457,10 @@ function registerIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('app:isPackaged', () => app.isPackaged)
   // Désinstallation COMPLÈTE : app + modèles + moteur GPU + historique + réglages. Irréversible.
+  // La confirmation est désormais INTERNE (modal in-app côté renderer) : plus de pop-up native ici.
+  // Renvoie 'dev' si non packagé (le renderer l'affiche dans le modal), sinon désinstalle puis quitte.
   ipcMain.handle('app:uninstall', async () => {
-    const { response } = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['Tout désinstaller', 'Annuler'],
-      defaultId: 1,
-      cancelId: 1,
-      title: 'Désinstaller VentaTalk',
-      message: 'Désinstaller VentaTalk et supprimer toutes les données ?',
-      detail:
-        'Cela supprime l’application, les modèles téléchargés (plusieurs Go), l’historique des dictées et tous les réglages. Action IRRÉVERSIBLE.'
-    })
-    if (response !== 0) return
-    if (!app.isPackaged) {
-      await dialog.showMessageBox({
-        type: 'info',
-        message: 'La désinstallation n’est disponible que dans la version installée (pas en développement).'
-      })
-      return
-    }
+    if (!app.isPackaged) return 'dev'
     isQuitting = true
     // Libère moteurs/modèles pour relâcher les verrous de fichiers avant suppression.
     try {
@@ -581,7 +603,7 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     applySettings()
-    startHotkey({ onStart: onRecordStart, onStop: onRecordStop })
+    startHotkey({ onStart: onRecordStart, onStop: onRecordStop, onCancel: cancelDictation })
     registerIpc()
 
     // Auto-update silencieux (uniquement en version installée ; no-op en dev).

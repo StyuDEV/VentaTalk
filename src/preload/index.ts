@@ -12,6 +12,8 @@ export interface VentaApi {
   // ── overlay (capture audio) ──
   onRecordStart: (cb: () => void) => void
   onRecordStop: (cb: () => void) => void
+  /** Dictée annulée (Échap) : stopper la capture SANS renvoyer l'audio. */
+  onRecordCancel: (cb: () => void) => void
   onState: (cb: (state: 'idle' | 'recording' | 'processing') => void) => void
   onSound: (cb: (kind: 'start' | 'done' | 'error') => void) => void
   onReinitAudio: (cb: () => void) => void
@@ -37,8 +39,9 @@ export interface VentaApi {
   getVersion: () => Promise<string>
   /** Vrai si l'app est packagée (build installé) — sert à masquer les outils de dev. */
   isPackaged: () => Promise<boolean>
-  /** Désinstalle l'app + supprime modèles/données (confirmation native côté main). */
-  uninstall: () => Promise<void>
+  /** Désinstalle l'app + supprime modèles/données. Confirmation INTERNE côté renderer.
+   *  Renvoie 'dev' si non packagé (rien n'est supprimé) ; sinon l'app quitte. */
+  uninstall: () => Promise<'dev' | void>
   /** Déclenche une vérification de mise à jour (no-op hors version installée). */
   checkUpdate: () => Promise<void>
   /** Une mise à jour est téléchargée et prête à installer. */
@@ -71,6 +74,7 @@ export interface VentaApi {
 const api: VentaApi = {
   onRecordStart: (cb) => ipcRenderer.on('record:start', () => cb()),
   onRecordStop: (cb) => ipcRenderer.on('record:stop', () => cb()),
+  onRecordCancel: (cb) => ipcRenderer.on('record:cancel', () => cb()),
   onState: (cb) => ipcRenderer.on('state', (_e, s) => cb(s)),
   onSound: (cb) => ipcRenderer.on('sound', (_e, k) => cb(k)),
   onReinitAudio: (cb) => ipcRenderer.on('audio:reinit', () => cb()),

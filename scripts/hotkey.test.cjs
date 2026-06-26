@@ -2,7 +2,7 @@
 // Usage : node scripts/hotkey.test.cjs <chemin-du-bundle-esbuild>
 const hk = require(process.argv[2])
 
-const K = { Ctrl: 29, Alt: 56, Shift: 42, Space: 57, F9: 67, A: 30 }
+const K = { Ctrl: 29, Alt: 56, Shift: 42, Space: 57, F9: 67, A: 30, Escape: 1 }
 const ev = (keycode, m = {}) => ({
   keycode,
   ctrlKey: !!m.ctrl,
@@ -21,7 +21,11 @@ function check(name, got, want) {
 function fresh() {
   const ev2 = []
   hk.__reset()
-  hk.__setHandlers({ onStart: () => ev2.push('start'), onStop: () => ev2.push('stop') })
+  hk.__setHandlers({
+    onStart: () => ev2.push('start'),
+    onStop: () => ev2.push('stop'),
+    onCancel: () => ev2.push('cancel')
+  })
   return ev2
 }
 
@@ -138,6 +142,33 @@ function fresh() {
     hk.handleKeyEvent('keydown', ev(K.Space, { ctrl: true }))
     hk.handleKeyEvent('keyup', ev(K.Space, { ctrl: true }))
     check('capture Ctrl+Space', await p, 'Ctrl+Space')
+  }
+
+  // I) Échap déclenche onCancel (annulation) sans toucher start/stop
+  {
+    const e = fresh()
+    hk.setActivationMode('hold'); hk.setHotkey('F9')
+    hk.handleKeyEvent('keydown', ev(K.Escape))
+    check('Échap -> cancel', e, ['cancel'])
+  }
+
+  // J) une touche quelconque (hors raccourci) ne déclenche PAS d'annulation
+  {
+    const e = fresh()
+    hk.setHotkey('F9')
+    hk.handleKeyEvent('keydown', ev(K.A))
+    hk.handleKeyEvent('keyup', ev(K.A))
+    check('A ne cancel pas', e, [])
+  }
+
+  // K) Échap pendant la capture ne déclenche PAS onCancel (capture en cours)
+  {
+    const e = fresh()
+    const p = hk.captureHotkey()
+    hk.handleKeyEvent('keydown', ev(K.Escape))
+    hk.handleKeyEvent('keyup', ev(K.Escape))
+    await p
+    check('Échap en capture ne cancel pas', e, [])
   }
 
   console.log(failures === 0 ? '\nALL_PASS' : `\n${failures} FAILED`)

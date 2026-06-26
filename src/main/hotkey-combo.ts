@@ -95,3 +95,32 @@ export function buildHotkeyString(mods: Mod[], key: number | null): string {
   if (key != null && CODE_TO_NAME[key]) parts.push(CODE_TO_NAME[key])
   return parts.join('+')
 }
+
+// Touches qui PRODUISENT un caractère quand on les presse SEULES (sans modificateur) : les
+// utiliser comme raccourci écrirait ce caractère dans l'app cible, car uiohook ne peut pas avaler
+// la frappe au niveau OS. On bloque alors ce choix à la capture (on exige un modificateur ou une
+// touche non-textuelle type F1–F12, flèches…). Cf. settings.ts (validation côté UI, par NOM de touche).
+export const TEXT_KEY_NAMES = new Set<string>([
+  ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)), // A..Z
+  ...Array.from({ length: 10 }, (_, d) => String(d)), // 0..9
+  ...Array.from({ length: 10 }, (_, n) => 'Numpad' + n), // Numpad0..9
+  'Space', 'Tab', 'Enter',
+  'Backquote', 'BracketLeft', 'BracketRight', 'Semicolon', 'Quote',
+  'Comma', 'Period', 'Slash', 'Backslash', 'Minus', 'Equal'
+])
+
+/** La touche (par son NOM CODE_TO_NAME) écrit-elle un caractère si pressée sans modificateur ? */
+export function isTextProducingKeyName(name: string): boolean {
+  return TEXT_KEY_NAMES.has(name)
+}
+
+/**
+ * Le raccourci écrirait-il un caractère dans l'app cible quand on l'active ?
+ * Vrai si une touche textuelle (lettre/chiffre/ponctuation/espace) est utilisée SANS modificateur
+ * (un modificateur Ctrl/Alt/Maj/Win transforme la frappe en raccourci, donc pas de texte inséré).
+ */
+export function hotkeyProducesText(str: string): boolean {
+  const parsed = parseHotkey(str)
+  if (parsed.mods.length > 0) return false
+  return parsed.keys.some((k) => isTextProducingKeyName(CODE_TO_NAME[k] ?? ''))
+}

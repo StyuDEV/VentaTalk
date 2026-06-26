@@ -395,6 +395,47 @@
       .hl-scroll ul { list-style: none; display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; }
       .hl-scroll li { display: flex; gap: 11px; font-size: 14.5px; line-height: 1.55; }
       .hl-scroll li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 8px; }
+
+      /* ── désinstallation : modal interne (plus de pop-up native) ── */
+      #uninstall {
+        position: fixed; inset: 0; background: rgba(6, 7, 14, 0.74); z-index: 60;
+        display: none; align-items: center; justify-content: center; padding: 40px;
+      }
+      #uninstall.show { display: flex; animation: fadeIn 0.25s ease; }
+      .un-drag { position: absolute; top: 0; left: 0; right: 0; height: 40px; -webkit-app-region: drag; }
+      .un-card {
+        position: relative; width: 100%; max-width: 440px; background: var(--surface);
+        border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 16px; padding: 28px 28px 24px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); animation: pageIn 0.3s var(--ease) both;
+      }
+      .un-icon {
+        width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center;
+        background: rgba(239, 68, 68, 0.13); color: #f87171; margin-bottom: 16px;
+      }
+      .un-title { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 8px; }
+      .un-text { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 0 0 16px; }
+      .un-list {
+        list-style: none; display: flex; flex-direction: column; gap: 9px; margin: 0 0 18px;
+        padding: 14px 16px; background: var(--surface-2); border-radius: 10px;
+      }
+      .un-list li { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--text); }
+      .un-list li::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: #f87171; }
+      .un-warn { font-size: 12.5px; color: #f9a8a8; font-weight: 500; margin: 0 0 22px; }
+      .un-actions { display: flex; gap: 10px; }
+      .un-actions button { flex: 1; padding: 12px 16px; font-size: 14px; }
+      .un-danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+      .un-danger:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; transform: translateY(-1px); }
+      /* état « en cours » : remplace le corps, on attend que l'app se ferme */
+      .un-busy { display: none; flex-direction: column; align-items: center; text-align: center; padding: 8px 0 4px; }
+      .un-busy .un-icon { margin: 0 0 18px; }
+      .un-spin {
+        width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(239, 68, 68, 0.22);
+        border-top-color: #f87171; animation: unSpin 0.8s linear infinite; margin-bottom: 18px;
+      }
+      .un-busy .un-title { margin-bottom: 6px; }
+      #uninstall.busy .un-confirm-body { display: none; }
+      #uninstall.busy .un-busy { display: flex; }
+      @keyframes unSpin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body class="playing">
@@ -732,6 +773,39 @@ git hub=&gt;GitHub"></textarea>
         <div class="cl-title">Notes de version</div>
         <div class="hl-scroll" id="hlList"></div>
         <div class="cl-actions"><button class="accent" id="hlClose">Fermer</button></div>
+      </div>
+    </div>
+
+    <!-- Désinstallation : confirmation INTERNE (plus de pop-up système) -->
+    <div id="uninstall">
+      <div class="un-drag"></div>
+      <div class="un-card">
+        <div class="un-confirm-body">
+          <div class="un-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+            </svg>
+          </div>
+          <h2 class="un-title">Désinstaller VentaTalk&nbsp;?</h2>
+          <p class="un-text">L’application sera retirée de votre PC, avec&nbsp;:</p>
+          <ul class="un-list">
+            <li>Les modèles téléchargés (plusieurs Go)</li>
+            <li>Le moteur GPU (whisper.cpp)</li>
+            <li>L’historique des dictées</li>
+            <li>Tous vos réglages</li>
+          </ul>
+          <p class="un-warn" id="unWarn">Cette action est définitive et irréversible.</p>
+          <div class="un-actions">
+            <button id="unCancel">Annuler</button>
+            <button class="un-danger" id="unConfirm">Tout désinstaller</button>
+          </div>
+        </div>
+        <div class="un-busy">
+          <div class="un-spin"></div>
+          <h2 class="un-title">Désinstallation en cours…</h2>
+          <p class="un-text" id="unBusyText">L’application va se fermer et nettoyer vos données.</p>
+        </div>
       </div>
     </div>
 

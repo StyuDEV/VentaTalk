@@ -30,6 +30,26 @@ function fmtSize(bytes: number): string {
   return Math.round(bytes / 1e6) + ' Mo'
 }
 
+// Touches qui ÉCRIVENT un caractère si pressées sans modificateur (miroir, par NOM, de
+// hotkey-combo.ts TEXT_KEY_NAMES — dupliqué ici car ce module natif ne peut pas être importé
+// dans le renderer). Un raccourci en touche textuelle SEULE taperait ce caractère dans l'app
+// cible (uiohook ne peut pas avaler la frappe) → on le refuse à la capture.
+const TEXT_KEYS = new Set<string>([
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+  ...'0123456789'.split('').flatMap((d) => [d, 'Numpad' + d]),
+  'Space', 'Tab', 'Enter',
+  'Backquote', 'BracketLeft', 'BracketRight', 'Semicolon', 'Quote',
+  'Comma', 'Period', 'Slash', 'Backslash', 'Minus', 'Equal'
+])
+const HOTKEY_MODS = new Set(['Ctrl', 'Alt', 'Shift', 'Win'])
+
+/** Le raccourci écrirait-il un caractère dans l'app cible (touche textuelle SANS modificateur) ? */
+function comboWritesChar(combo: string): boolean {
+  const parts = combo.split('+').map((p) => p.trim()).filter(Boolean)
+  if (parts.some((p) => HOTKEY_MODS.has(p))) return false // un modificateur protège
+  return parts.some((p) => TEXT_KEYS.has(p))
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 function showToast(message: string): void {
   const el = $('toast')
@@ -458,7 +478,11 @@ function wireOnboarding(hotkey: string): void {
     const captured = await v.captureHotkey()
     wzHotkey.classList.remove('capturing')
     wzCapture.disabled = false
-    if (captured) {
+    if (captured && comboWritesChar(captured)) {
+      // Touche textuelle seule : elle s'écrirait dans le texte → on refuse.
+      wzHotkey.textContent = fmt(hotkey)
+      showToast('« ' + fmt(captured) + ' » s’écrirait dans ton texte. Ajoute Ctrl/Alt/Maj ou une touche F1–F12.')
+    } else if (captured) {
       await v.setSettings({ hotkey: captured })
       wzHotkey.textContent = fmt(captured)
     } else {
@@ -557,8 +581,32 @@ async function init(): Promise<void> {
   $('checkUpdate').addEventListener('click', doCheck)
   $('checkUpdate2').addEventListener('click', doCheck)
 
-  // désinstallation complète (app + modèles + données) — confirmation native côté main
-  ;($('uninstallBtn') as HTMLButtonElement).addEventListener('click', () => void v.uninstall())
+  // désinstallation complète (app + modèles + données) — confirmation INTERNE (modal in-app)
+  const unModal = $('uninstall')
+  const closeUninstall = (): void => unModal.classList.remove('show', 'busy')
+  ;($('uninstallBtn') as HTMLButtonElement).addEventListener('click', () => {
+    unModal.classList.remove('busy')
+    unModal.classList.add('show')
+  })
+  $('unCancel').addEventListener('click', closeUninstall)
+  // clic sur le fond (hors carte) = annuler
+  unModal.addEventListener('click', (e) => {
+    if (e.target === unModal) closeUninstall()
+  })
+  // Échap = annuler (tant que la désinstallation n'est pas lancée)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && unModal.classList.contains('show') && !unModal.classList.contains('busy'))
+      closeUninstall()
+  })
+  ;($('unConfirm') as HTMLButtonElement).addEventListener('click', async () => {
+    unModal.classList.add('busy') // bascule sur l'écran « en cours », l'app va se fermer
+    const res = await v.uninstall()
+    // En dev (non packagé) l'app ne se ferme pas : on l'explique dans le modal au lieu d'une pop-up.
+    if (res === 'dev') {
+      unModal.classList.remove('busy')
+      $('unWarn').textContent = 'Indisponible en mode développement (uniquement dans la version installée).'
+    }
+  })
 
   // écran PLEIN « mise à jour en cours » : téléchargement → prête → installation (prend toute la fenêtre)
   const us = $('updateScreen')
@@ -659,7 +707,11 @@ async function init(): Promise<void> {
     hotkeyDisplay.classList.remove('capturing')
     captureBtn.disabled = false
     captureBtn.textContent = label || 'Changer…'
-    if (captured) {
+    if (captured && comboWritesChar(captured)) {
+      // Touche textuelle seule : elle s'écrirait dans le texte (uiohook ne peut pas l'avaler) → refus.
+      showHotkey(currentHotkey)
+      showToast('« ' + fmtCombo(captured) + ' » s’écrirait dans ton texte. Ajoute Ctrl/Alt/Maj ou une touche F1–F12.')
+    } else if (captured) {
       await v.setSettings({ hotkey: captured })
       showHotkey(captured)
       showToast('Raccourci : ' + fmtCombo(captured))

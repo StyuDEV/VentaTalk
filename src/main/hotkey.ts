@@ -6,6 +6,7 @@ import {
   MOD_KEYCODES,
   MOD_CODES,
   CODE_TO_NAME,
+  NAME_TO_CODE,
   parseHotkey,
   isComboActive,
   activeMods,
@@ -15,7 +16,12 @@ import {
 export interface HotkeyHandlers {
   onStart: () => void
   onStop: () => void
+  /** Échap pressé : annule la dictée en cours (no-op si rien en cours, géré côté index.ts). */
+  onCancel?: () => void
 }
+
+// Keycode de la touche Échap (annulation d'une dictée en cours).
+const ESCAPE_CODE = NAME_TO_CODE['Escape']
 
 interface KeyEvent {
   keycode: number
@@ -141,7 +147,19 @@ export function handleKeyEvent(type: 'keydown' | 'keyup', e: KeyEvent): void {
     }
     return
   }
+  // Échap (appui) -> demande d'annulation de la dictée en cours (index.ts ignore si état idle).
+  if (type === 'keydown' && e.keycode === ESCAPE_CODE) handlers?.onCancel?.()
   evaluate()
+}
+
+/**
+ * Remet à zéro l'état d'activation (utilisé après une annulation Échap). En mode "toggle", évite
+ * que la prochaine pression du raccourci compte comme un "off" (la dictée a déjà été coupée) ; en
+ * mode "hold", force un nouvel appui propre.
+ */
+export function resetActivation(): void {
+  wasActive = false
+  toggleOn = false
 }
 
 export function startHotkey(h: HotkeyHandlers): void {

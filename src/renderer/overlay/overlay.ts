@@ -280,6 +280,13 @@ window.venta.onRecordStop(() => {
   setState('processing')
 })
 
+// Annulation (Échap) : on stoppe la capture et on JETTE l'audio (aucun sendAudio).
+// Le main remet l'état à idle (-> animation de sortie via onState).
+window.venta.onRecordCancel(() => {
+  recording = false
+  chunks = []
+})
+
 window.venta.onState((s) => {
   setState(s)
   if (s === 'idle') pill.classList.remove('show') // animation de sortie (descente)
