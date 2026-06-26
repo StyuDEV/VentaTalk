@@ -45,7 +45,9 @@ export async function ensureLlm(modelPath: string): Promise<void> {
     await model.dispose()
     model = null
   }
-  llama = await llamaModule.getLlama()
+  // logLevel 'error' : coupe les logs WARN/INFO de llama.cpp (ex. « [node-llama-cpp] load:
+  // control-looking token… ») qui fuyaient dans le terminal, tout en gardant les vraies erreurs.
+  llama = await llamaModule.getLlama({ logLevel: llamaModule.LlamaLogLevel.error })
   model = await llama.loadModel({ modelPath })
   loadedPath = modelPath
 }

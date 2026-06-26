@@ -11,3 +11,5 @@ models/
 # Docs internes (assistant + process de release) — gardées en local, jamais publiées
 CLAUDE.md
 RELEASING.md
+# Journal des features faites en local mais pas encore publiées (voir CLAUDE.md)
+nextfeature.md

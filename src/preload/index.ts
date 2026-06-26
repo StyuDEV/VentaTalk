@@ -37,6 +37,8 @@ export interface VentaApi {
   getVersion: () => Promise<string>
   /** Vrai si l'app est packagée (build installé) — sert à masquer les outils de dev. */
   isPackaged: () => Promise<boolean>
+  /** Désinstalle l'app + supprime modèles/données (confirmation native côté main). */
+  uninstall: () => Promise<void>
   /** Déclenche une vérification de mise à jour (no-op hors version installée). */
   checkUpdate: () => Promise<void>
   /** Une mise à jour est téléchargée et prête à installer. */
@@ -87,6 +89,7 @@ const api: VentaApi = {
   getRecordSound: () => ipcRenderer.invoke('sound:get'),
   getVersion: () => ipcRenderer.invoke('app:version'),
   isPackaged: () => ipcRenderer.invoke('app:isPackaged'),
+  uninstall: () => ipcRenderer.invoke('app:uninstall'),
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
   isUpdateReady: () => ipcRenderer.invoke('update:isReady'),
   installUpdate: () => ipcRenderer.invoke('update:install'),

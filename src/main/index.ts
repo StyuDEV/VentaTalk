@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, screen, session, clipboard, Notification } from 'electron'
-import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { app, BrowserWindow, ipcMain, screen, session, clipboard, Notification, dialog } from 'electron'
+import { join, dirname } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 
 import {
   getSettings,
@@ -416,6 +417,67 @@ function registerIpc(): void {
   ipcMain.handle('app:openSettings', () => openSettings())
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('app:isPackaged', () => app.isPackaged)
+  // Désinstallation COMPLÈTE : app + modèles + moteur GPU + historique + réglages. Irréversible.
+  ipcMain.handle('app:uninstall', async () => {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Tout désinstaller', 'Annuler'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Désinstaller VentaTalk',
+      message: 'Désinstaller VentaTalk et supprimer toutes les données ?',
+      detail:
+        'Cela supprime l’application, les modèles téléchargés (plusieurs Go), l’historique des dictées et tous les réglages. Action IRRÉVERSIBLE.'
+    })
+    if (response !== 0) return
+    if (!app.isPackaged) {
+      await dialog.showMessageBox({
+        type: 'info',
+        message: 'La désinstallation n’est disponible que dans la version installée (pas en développement).'
+      })
+      return
+    }
+    isQuitting = true
+    // Libère moteurs/modèles pour relâcher les verrous de fichiers avant suppression.
+    try {
+      await freeWhisper()
+    } catch {
+      /* noop */
+    }
+    try {
+      await freeLlm()
+    } catch {
+      /* noop */
+    }
+    const installDir = dirname(app.getPath('exe'))
+    const userData = app.getPath('userData') // %APPDATA%/ventatalk : modèles, moteur GPU, historique, réglages
+    const updaterCache = join(process.env.LOCALAPPDATA || '', 'ventatalk-updater')
+    let uninstaller: string | null = null
+    try {
+      const f = readdirSync(installDir).find((n) => /uninstall.*\.exe$/i.test(n))
+      uninstaller = f ? join(installDir, f) : null
+    } catch {
+      /* noop */
+    }
+    // Script détaché : attend la fermeture de l'app (2 s), supprime données + cache, puis lance le
+    // désinstalleur NSIS en silence (retire l'app de Program Files + le registre + les raccourcis).
+    const ps =
+      `Start-Sleep -Seconds 2; ` +
+      `Remove-Item -LiteralPath '${userData}','${updaterCache}' -Recurse -Force -ErrorAction SilentlyContinue; ` +
+      (uninstaller
+        ? `Start-Process -FilePath '${uninstaller}' -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue`
+        : '')
+    try {
+      spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      }).unref()
+    } catch {
+      /* noop */
+    }
+    app.quit()
+  })
   ipcMain.handle('app:checkUpdate', () => checkForUpdates(toast))
   ipcMain.handle('update:isReady', () => isUpdateReady())
   ipcMain.handle('update:install', () => {

@@ -3,6 +3,13 @@
 // Garder la plus récente en haut de l'objet pour s'y retrouver.
 
 export const CHANGELOG: Record<string, string[]> = {
+  '1.0.1': [
+    'Nouveau bouton « Désinstaller » : retire l’application, les modèles et toutes les données en une seule fois.',
+    'Configuration du micro revue dans l’assistant : choix du micro + niveau sonore en direct (en dB).',
+    'Les notes de version regroupent désormais tout l’historique des nouveautés.',
+    'L’interface s’adapte quand on agrandit la fenêtre (réglages et assistant de configuration).',
+    'Améliorations visuelles et de stabilité.'
+  ],
   '1.0.0': [
     'Première version stable de VentaTalk.',
     'Dictée vocale 100 % locale (GPU), nettoyée par IA, écrite au curseur dans n’importe quelle application.'

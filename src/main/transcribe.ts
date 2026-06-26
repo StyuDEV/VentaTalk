@@ -1,7 +1,7 @@
 import os from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { Whisper, WhisperSamplingStrategy, type TranscribeParams } from 'smart-whisper'
+import type { Whisper as WhisperInstance, TranscribeParams } from 'smart-whisper'
 import { whisperServerExe } from './models'
 
 const N_THREADS = Math.max(2, Math.min(os.cpus().length, 8))
@@ -29,7 +29,25 @@ let server: ChildProcess | null = null
 let serverSig: string | null = null
 
 // ── moteur CPU : smart-whisper (repli) ──
-let cpu: Whisper | null = null
+let cpu: WhisperInstance | null = null
+
+// smart-whisper charge un addon natif (whisper.cpp) qui imprime ses logs sur stderr SAUF si
+// NODE_ENV === 'production' à l'init de l'addon. On l'importe DYNAMIQUEMENT (au repli CPU seulement)
+// avec NODE_ENV forcé le temps du chargement → plus de logs ggml/whisper qui fuient dans le terminal.
+let smartWhisper: typeof import('smart-whisper') | null = null
+async function loadSmartWhisper(): Promise<typeof import('smart-whisper')> {
+  if (!smartWhisper) {
+    const prev = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      smartWhisper = await import('smart-whisper')
+    } finally {
+      if (prev === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = prev
+    }
+  }
+  return smartWhisper
+}
 
 /** Initial prompt : biais ponctuation/casse + vocabulaire. Poussé même SANS vocabulaire
  *  (le biais de ponctuation est gratuit et améliore casse/ponctuation par défaut). */
@@ -123,6 +141,7 @@ async function ensureCpu(modelPath: string): Promise<void> {
     await cpu.free()
     cpu = null
   }
+  const { Whisper } = await loadSmartWhisper()
   cpu = new Whisper(modelPath, { gpu: false })
 }
 
@@ -167,6 +186,7 @@ async function transcribeGpu(pcm: Float32Array): Promise<string> {
 
 async function transcribeCpu(pcm: Float32Array, language: string): Promise<string> {
   if (!cpu) throw new Error('moteur CPU non chargé')
+  const { WhisperSamplingStrategy } = await loadSmartWhisper()
   const lang = currentCfg?.language || language || 'auto'
   // Repli CPU aligné sur le GPU : même beam search, suppression non-vocale, seuil entropie,
   // prompt (ponctuation + vocabulaire) et plafond de contexte -> qualité homogène en mode dégradé.

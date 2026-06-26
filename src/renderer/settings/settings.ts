@@ -246,7 +246,12 @@ function paintWizard(): void {
   dots.forEach((d) => d.classList.toggle('on', Number(d.dataset.dot) <= wizStep))
   ;($('wzBack') as HTMLButtonElement).style.visibility = wizStep === 0 ? 'hidden' : 'visible'
   ;($('wzNext') as HTMLButtonElement).textContent = wizStep === WIZ_STEPS - 1 ? 'Terminer' : 'Continuer'
-  if (wizStep !== 0) stopMicTest() // libère le micro quand on quitte l'étape de test
+  // Étape 0 : on démarre l'écoute live automatiquement (plus de bouton « Tester ») ; sinon on coupe.
+  if (wizStep === 0) {
+    if (!micStream) void startMicTest()
+  } else {
+    stopMicTest()
+  }
 }
 
 function showWizard(): void {
@@ -265,7 +270,7 @@ async function finishWizard(): Promise<void> {
   await renderModels()
 }
 
-// ── test micro (détection live, étape 1 de l'assistant) ──
+// ── test micro (assistant, étape 0) : sélecteur + niveau live + dB ──
 let micStream: MediaStream | null = null
 let micRAF = 0
 let micCtx: AudioContext | null = null
@@ -281,42 +286,74 @@ function stopMicTest(): void {
   }
 }
 
-function resetMicTest(): void {
-  stopMicTest()
-  const meter = document.getElementById('micMeter')
-  const level = document.getElementById('micLevel') as HTMLElement | null
+function setMicStatus(text: string, cls = ''): void {
   const st = document.getElementById('micStatus')
-  meter?.classList.remove('on')
-  if (level) level.style.width = '0%'
   if (st) {
-    st.className = 'size mic-status'
-    st.textContent = 'Clique sur « Tester » et parle — on mesure le signal en direct.'
+    st.className = 'size mic-status' + (cls ? ' ' + cls : '')
+    st.textContent = text
   }
 }
 
+function resetMicTest(): void {
+  stopMicTest()
+  const fill = document.getElementById('wzMicFill') as HTMLElement | null
+  const dbEl = document.getElementById('wzMicDb')
+  const retry = document.getElementById('wzMicRetry') as HTMLElement | null
+  if (fill) {
+    fill.style.width = '0%'
+    fill.classList.remove('loud')
+  }
+  if (dbEl) dbEl.textContent = '—'
+  if (retry) retry.style.display = 'none'
+  setMicStatus('Initialisation du micro…')
+}
+
+/** Remplit le sélecteur de micro de l'assistant (libellés débloqués via une permission éphémère). */
+async function populateWzMics(current: string): Promise<void> {
+  const sel = document.getElementById('wzMicDevice') as HTMLSelectElement | null
+  if (!sel) return
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true })
+    tmp.getTracks().forEach((t) => t.stop())
+  } catch {
+    /* permission refusée -> garde « Par défaut » */
+  }
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const mics = devices.filter((d) => d.kind === 'audioinput')
+    sel.innerHTML =
+      '<option value="">Par défaut</option>' +
+      mics.map((d, i) => `<option value="${d.deviceId}">${d.label || 'Micro ' + (i + 1)}</option>`).join('')
+    sel.value = current
+  } catch {
+    /* noop */
+  }
+}
+
+/** Écoute live le micro sélectionné : barre de niveau + dB en continu, avec zones de qualité. */
 async function startMicTest(): Promise<void> {
   stopMicTest()
-  const statusEl = $('micStatus')
-  const meter = $('micMeter')
-  const level = $('micLevel')
-  statusEl.className = 'size mic-status'
-  statusEl.textContent = 'Initialisation…'
+  const fill = $('wzMicFill')
+  const dbEl = $('wzMicDb')
+  const retry = $('wzMicRetry')
+  retry.style.display = 'none'
+  const deviceId = ($('wzMicDevice') as HTMLSelectElement).value
+  setMicStatus('Initialisation du micro…')
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true
+    })
   } catch {
-    statusEl.className = 'size mic-status err'
-    statusEl.textContent = 'Aucun micro détecté ou accès refusé — vérifie les permissions Windows.'
+    setMicStatus('Micro inaccessible — vérifie les permissions micro de Windows.', 'err')
+    retry.style.display = ''
     return
   }
-  meter.classList.add('on')
-  statusEl.textContent = 'Parle… on mesure le signal.'
   micCtx = new AudioContext()
   const src = micCtx.createMediaStreamSource(micStream)
   const analyser = micCtx.createAnalyser()
   analyser.fftSize = 1024
   src.connect(analyser)
   const data = new Uint8Array(analyser.fftSize)
-  let detected = false
   const loop = (): void => {
     analyser.getByteTimeDomainData(data)
     let sum = 0
@@ -325,12 +362,15 @@ async function startMicTest(): Promise<void> {
       sum += x * x
     }
     const rms = Math.sqrt(sum / data.length)
-    level.style.width = Math.min(100, Math.round(rms * 320)) + '%'
-    if (rms > 0.015 && !detected) {
-      detected = true
-      statusEl.className = 'size mic-status ok'
-      statusEl.textContent = '✓ Micro détecté — le niveau réagit à ta voix.'
-    }
+    const db = rms > 1e-5 ? 20 * Math.log10(rms) : -100 // dBFS approx
+    // mappe [-60 dB, 0 dB] -> [0 %, 100 %] ; zone « bon niveau » = -40 à -10 dB (33–83 %)
+    fill.style.width = Math.max(0, Math.min(100, ((db + 60) / 60) * 100)) + '%'
+    const tooLoud = db > -10
+    fill.classList.toggle('loud', tooLoud)
+    dbEl.textContent = db <= -100 ? '—' : String(Math.round(db))
+    if (db < -40) setMicStatus('Trop faible — rapproche-toi ou monte le volume du micro.')
+    else if (tooLoud) setMicStatus('Un peu fort — éloigne-toi un peu.', 'warn')
+    else setMicStatus('Bon niveau ✓', 'ok')
     micRAF = requestAnimationFrame(loop)
   }
   loop()
@@ -392,7 +432,15 @@ function wireOnboarding(hotkey: string): void {
   })
   ;($('wzSkip') as HTMLButtonElement).addEventListener('click', () => void finishWizard())
 
-  ;($('wzMicTest') as HTMLButtonElement).addEventListener('click', () => void startMicTest())
+  // sélecteur de micro de l'assistant : enregistre le choix, garde le réglage principal synchro, relance l'écoute
+  ;($('wzMicDevice') as HTMLSelectElement).addEventListener('change', async () => {
+    const id = ($('wzMicDevice') as HTMLSelectElement).value
+    await v.setSettings({ micDeviceId: id })
+    const main = document.getElementById('micDevice') as HTMLSelectElement | null
+    if (main) main.value = id
+    void startMicTest()
+  })
+  ;($('wzMicRetry') as HTMLButtonElement).addEventListener('click', () => void startMicTest())
 
   const wzHotkey = $('wzHotkey')
   wzHotkey.textContent = fmt(hotkey)
@@ -502,6 +550,9 @@ async function init(): Promise<void> {
   const doCheck = (): void => void v.checkUpdate()
   $('checkUpdate').addEventListener('click', doCheck)
   $('checkUpdate2').addEventListener('click', doCheck)
+
+  // désinstallation complète (app + modèles + données) — confirmation native côté main
+  ;($('uninstallBtn') as HTMLButtonElement).addEventListener('click', () => void v.uninstall())
 
   // écran PLEIN « mise à jour en cours » : téléchargement → prête → installation (prend toute la fenêtre)
   const us = $('updateScreen')
@@ -654,6 +705,7 @@ async function init(): Promise<void> {
   bindToggle('keepHistory', 'keepHistory')
 
   await populateMics(s.micDeviceId ?? '')
+  await populateWzMics(s.micDeviceId ?? '')
 
   // zones de texte (sauvegarde au change)
   const bindText = (id: string, key: string): void => {
@@ -679,16 +731,8 @@ async function init(): Promise<void> {
   ;($('onboardingReplay') as HTMLButtonElement).addEventListener('click', () => showWizard())
   if (!s.onboardingDone) showWizard()
 
-  // changelog : bouton « Notes de version » + fermeture du modal
+  // « Notes de version » : affiche directement TOUT l'historique (version par version)
   ;($('showChangelog') as HTMLButtonElement).addEventListener('click', async () => {
-    const cl = await v.changelogCurrent()
-    if (cl) renderChangelog(cl)
-    else showToast('Pas de notes pour cette version.')
-  })
-  ;($('clClose') as HTMLButtonElement).addEventListener('click', () => $('changelog').classList.remove('show'))
-
-  // historique des versions : liste TOUTES les notes (anciennes versions comprises)
-  ;($('showHistory') as HTMLButtonElement).addEventListener('click', async () => {
     const all = await v.changelogAll()
     if (!all.length) {
       showToast('Aucune note de version.')
@@ -704,6 +748,7 @@ async function init(): Promise<void> {
       .join('')
     $('histLog').classList.add('show')
   })
+  ;($('clClose') as HTMLButtonElement).addEventListener('click', () => $('changelog').classList.remove('show'))
   ;($('hlClose') as HTMLButtonElement).addEventListener('click', () => $('histLog').classList.remove('show'))
 
   setupSeg() // indicateurs coulissants des contrôles segmentés (après réglage des cochés)
