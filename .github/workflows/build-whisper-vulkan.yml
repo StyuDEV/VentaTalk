@@ -59,10 +59,12 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release view whisper-vulkan-v1 *> $null
-          if ($LASTEXITCODE -eq 0) { gh release delete whisper-vulkan-v1 --yes --cleanup-tag }
-          gh release create whisper-vulkan-v1 whisper-vulkan-bin-x64.zip `
+          # Pas de checkout du repo dans ce job -> on passe --repo explicitement (sinon gh cherche un .git).
+          gh release view whisper-vulkan-v1 --repo $env:REPO *> $null
+          if ($LASTEXITCODE -eq 0) { gh release delete whisper-vulkan-v1 --repo $env:REPO --yes --cleanup-tag }
+          gh release create whisper-vulkan-v1 whisper-vulkan-bin-x64.zip --repo $env:REPO `
             --title "Moteur whisper Vulkan (AMD / Intel)" `
             --notes "Construit en CI depuis whisper.cpp ${{ github.event.inputs.whisper_ref }} (GGML_VULKAN=ON). Téléchargé automatiquement par VentaTalk pour les GPU non-NVIDIA. Ne pas supprimer ce tag." `
             --latest=false
