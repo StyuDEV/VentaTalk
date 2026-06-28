@@ -122,17 +122,25 @@ function animate(): void {
   const t = performance.now() / 1000
   const rec = pill.classList.contains('recording')
   const proc = pill.classList.contains('processing')
+  const err = pill.classList.contains('error')
   for (let i = 0; i < BAR_COUNT; i++) {
-    let v = 0.12
+    // enveloppe centrée (plus haut au milieu)
+    const center = 1 - Math.abs((i - (BAR_COUNT - 1) / 2) / ((BAR_COUNT - 1) / 2))
+    const env = 0.4 + 0.6 * center
+    let v: number
     if (rec) {
-      // enveloppe centrée (plus haut au milieu) + ondulation par barre, modulée par le niveau micro
-      const center = 1 - Math.abs((i - (BAR_COUNT - 1) / 2) / ((BAR_COUNT - 1) / 2))
-      const env = 0.35 + 0.65 * center
+      // écoute : ondulation par barre, modulée par le niveau micro
       const wob = 0.5 + 0.5 * Math.sin(t * 9 + i * 0.55)
-      v = 0.14 + l * env * (0.45 + 0.55 * wob)
+      v = 0.14 + l * env * (0.55 + 0.45 * wob)
     } else if (proc) {
-      // onde de "chargement" qui traverse la barre
-      v = 0.18 + 0.34 * (0.5 + 0.5 * Math.sin(t * 6 - i * 0.5))
+      // traitement : onde de "chargement" (violette) qui traverse la barre
+      v = 0.16 + 0.46 * (0.5 + 0.5 * Math.sin(t * 6 - i * 0.5))
+    } else if (err) {
+      // erreur : barres figées (pas de rebond) -> lecture "stop", calme
+      v = 0.2 * env + 0.05
+    } else {
+      // repos : ligne calme qui respire légèrement
+      v = 0.11 + Math.sin(t * 1.6 + i * 0.5) * 0.03
     }
     bars[i].style.transform = `scaleY(${Math.max(0.1, Math.min(1, v))})`
   }
@@ -258,6 +266,7 @@ function playTone(kind: 'start' | 'done' | 'error'): void {
 
 window.venta.onRecordStart(async () => {
   if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume()
+  hideToastBanner() // efface une éventuelle bannière d'erreur de la dictée précédente
   chunks = preroll.slice() // démarre avec le pré-roll -> on ne perd pas l'attaque de la phrase
   recording = true
   setState('recording')
@@ -293,6 +302,30 @@ window.venta.onState((s) => {
 })
 window.venta.onSound((kind) => playTone(kind))
 window.venta.onReinitAudio(() => void initAudio())
+
+// ── Bannière d'erreur à l'écran (réutilise la fenêtre overlay) ──
+const toastEl = document.getElementById('toast') as HTMLDivElement
+const toastMsg = document.getElementById('toastMsg') as HTMLSpanElement
+let toastHideTimer: ReturnType<typeof setTimeout> | null = null
+function showToastBanner(message: string): void {
+  pill.classList.remove('show') // la barre de dictée redescend si elle est encore là
+  toastMsg.textContent = message
+  if (toastHideTimer) clearTimeout(toastHideTimer)
+  // courte tempo : laisse la barre descendre avant que la bannière jaillisse (pas de chevauchement)
+  setTimeout(() => requestAnimationFrame(() => toastEl.classList.add('show')), 130)
+  toastHideTimer = setTimeout(() => {
+    toastEl.classList.remove('show')
+    toastHideTimer = null
+  }, 2400)
+}
+function hideToastBanner(): void {
+  if (toastHideTimer) {
+    clearTimeout(toastHideTimer)
+    toastHideTimer = null
+  }
+  toastEl.classList.remove('show')
+}
+window.venta.onOverlayToast((m) => showToastBanner(m))
 
 void initAudio()
 void loadSounds()

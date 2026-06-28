@@ -56,23 +56,45 @@ export function isLlmLoaded(): boolean {
   return model !== null
 }
 
+// Au-delà, le texte + le system prompt débordent le contexte 2048 : le LLM part en context-shift
+// (lent, instable) sans réelle valeur ajoutée. On saute le nettoyage (le texte est déjà passé par
+// les disfluences déterministes + le dictionnaire de remplacements). ~3000 caractères ≈ une dictée
+// de plusieurs minutes — bien au-delà d'un usage normal au curseur.
+const MAX_CLEANUP_CHARS = 3000
+// Plafond de temps de génération : au-delà, on abandonne le nettoyage (signal d'abort) et on garde
+// le texte brut. Empêche une génération qui s'éternise de figer le pipeline.
+const CLEANUP_TIMEOUT_MS = 15000
+
 /**
  * Nettoie le texte brut via le LLM. Sans état entre les appels (contexte recréé puis libéré).
- * Garde-fou : si la sortie est vide ou aberrante, on renvoie le texte brut.
+ * Garde-fou : si la sortie est vide ou aberrante, ou si le texte est trop long / la génération
+ * trop lente, on renvoie le texte brut.
  */
 export async function cleanup(rawText: string, vocabulary?: string): Promise<string> {
   const raw = rawText.trim()
   if (!model || !raw) return raw
+  // Texte trop long pour le contexte : on saute le LLM (déjà nettoyé en amont).
+  if (raw.length > MAX_CLEANUP_CHARS) return raw
 
   const { LlamaChatSession } = llamaModule
   const context = await model.createContext({ contextSize: 2048 })
+  // Abort au bout de CLEANUP_TIMEOUT_MS : stopOnAbortSignal -> la génération s'arrête PROPREMENT
+  // (sans exception) ; on retombe alors sur le texte brut (un partiel tronqué est peu fiable).
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), CLEANUP_TIMEOUT_MS)
   try {
     const session = new LlamaChatSession({
       contextSequence: context.getSequence(),
       systemPrompt: systemPrompt(vocabulary)
     })
     // temperature 0 -> nettoyage déterministe (reproductible, testable).
-    const out: string = await session.prompt(raw, { temperature: 0, maxTokens: 1024 })
+    const out: string = await session.prompt(raw, {
+      temperature: 0,
+      maxTokens: 1024,
+      signal: ctl.signal,
+      stopOnAbortSignal: true
+    })
+    if (ctl.signal.aborted) return raw // timeout atteint : on garde le brut
     const cleaned = stripModelChrome(out || '')
     if (!cleaned) return raw
     // si le modèle a déliré (sortie 3x plus longue), on garde le brut
@@ -81,6 +103,7 @@ export async function cleanup(rawText: string, vocabulary?: string): Promise<str
   } catch {
     return raw
   } finally {
+    clearTimeout(timer)
     await context.dispose()
   }
 }

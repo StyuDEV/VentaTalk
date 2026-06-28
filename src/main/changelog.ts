@@ -3,6 +3,16 @@
 // Garder la plus récente en haut de l'objet pour s'y retrouver.
 
 export const CHANGELOG: Record<string, string[]> = {
+  '1.1.0': [
+    'Nouvelle barre de dictée façon « Dynamic Island » : plus sobre, plus lisible, animation plus douce.',
+    'Les messages d’erreur s’affichent maintenant directement à l’écran (petite bannière sous le curseur), plus seulement dans la fenêtre de l’app — par exemple « Rien entendu » si vous avez parlé trop bas.',
+    'La touche pour annuler une dictée est désormais personnalisable (Réglages → Dictée ; Échap par défaut).',
+    'Réglages réorganisés en un menu plus clair : Dictée · Moteur & modèles · Historique · Application.',
+    'Transcription désormais 100 % GPU (le repli sur le processeur, trop lent, a été retiré) — un moteur GPU est requis, l’assistant le propose au 1er lancement.',
+    'Les longues dictées ne bloquent plus l’application.',
+    'Si l’écriture au curseur échoue (fenêtre administrateur, jeu plein écran…), le texte est conservé dans le presse-papiers — collez-le avec Ctrl+V.',
+    'Fiabilité et affichage : téléchargements de modèles vérifiés, carte graphique détectée indiquée, défilement des Réglages corrigé, et diverses améliorations de stabilité.'
+  ],
   '1.0.3': [
     'Désinstallation repensée : la confirmation se fait désormais dans l’application (fini la fenêtre système), avec le détail de ce qui sera supprimé.',
     'Appuyez sur Échap pendant une dictée pour l’annuler — rien n’est transcrit ni écrit.',

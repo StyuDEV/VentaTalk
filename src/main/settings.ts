@@ -8,13 +8,13 @@ export type WhisperEnginePref = 'auto' | 'cuda' | 'vulkan'
 export interface AppSettings {
   /** Nom de la touche (clé de HOTKEY_OPTIONS), ex. "F9". */
   hotkey: string
+  /** Raccourci d'annulation de la dictée en cours (combo, ex. "Escape", "Ctrl+Q"). Défaut "Escape". */
+  cancelHotkey: string
   /** "hold" = maintenir pour parler ; "toggle" = appuyer pour démarrer/arrêter. */
   activationMode: ActivationMode
   /** "auto" ou code langue ("fr", "en", "es"...). */
   language: string
   whisperModel: WhisperModelId
-  /** Utiliser le GPU (whisper.cpp en sidecar) si le moteur GPU est installé. */
-  useGpu: boolean
   /** Moteur whisper GPU : 'auto' (détecté selon la carte), 'cuda' (NVIDIA) ou 'vulkan' (AMD/Intel). */
   whisperEngine: WhisperEnginePref
   /** VAD énergie ADAPTATIF côté client (dsp.ts) : coupe le silence aux bords -> anti-hallucination.
@@ -48,12 +48,12 @@ export interface AppSettings {
 
 const defaults: AppSettings = {
   hotkey: 'F9',
+  cancelHotkey: 'Escape',
   activationMode: 'hold',
   language: 'fr',
   // Défaut FR fine-tuné (meilleur WER fr, moins d'hallucinations). resolveWhisperModel()
   // retombe sur un autre modèle déjà téléchargé si celui-ci est absent (pas de régression).
   whisperModel: 'fr-distil-dec16',
-  useGpu: true,
   whisperEngine: 'auto',
   vadEnabled: true,
   vocabulary: '',

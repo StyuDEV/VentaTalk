@@ -15,6 +15,7 @@ import {
   startHotkey,
   stopHotkey,
   setHotkey,
+  setCancelHotkey,
   setActivationMode,
   captureHotkey,
   resetActivation
@@ -33,7 +34,7 @@ import {
   downloadModel,
   type DownloadProgress
 } from './models'
-import { ensureEngine, transcribe, freeWhisper, type EngineConfig } from './transcribe'
+import { ensureEngine, transcribe, freeWhisper, recoverFromHang, type EngineConfig } from './transcribe'
 import { ensureLlm, cleanup, freeLlm } from './cleanup'
 import { applyReplacements } from './replacements'
 import { stripDisfluencies } from './disfluencies'
@@ -43,6 +44,7 @@ import { appIcon, resourcePath } from './resources'
 import { addHistory, getHistory, deleteHistory, clearHistory } from './history'
 import { initAutoUpdate, isUpdateReady, checkForUpdates, quitAndInstall } from './updater'
 import { changelogFor, allChangelogs } from './changelog'
+import { log } from './log'
 
 interface ChangelogPayload {
   version: string
@@ -52,7 +54,6 @@ interface ChangelogPayload {
 let pendingChangelog: ChangelogPayload | null = null
 
 let lastTranscript = ''
-let gpuFellBack = false
 let muteArmed = false // l'option "couper le son" est active pour la dictée en cours
 let muteApplied = false // on a réellement coupé le son système (à restaurer)
 
@@ -67,15 +68,6 @@ function restoreSystemAudio(): void {
     muteApplied = false
     unmuteSystemAudio()
   }
-}
-
-function notifyBackend(backend: 'gpu' | 'cpu' | null): void {
-  const wantedGpu = getSetting('useGpu') && isGpuBinPresent()
-  if (wantedGpu && backend === 'cpu' && !gpuFellBack) {
-    gpuFellBack = true
-    toast('GPU indisponible → transcription sur CPU (plus lente).')
-  }
-  if (backend === 'gpu') gpuFellBack = false
 }
 
 // Ordre de préférence quand le modèle choisi n'est pas téléchargé (FR d'abord, langue par défaut).
@@ -96,7 +88,6 @@ function engineConfig(): EngineConfig {
   const model = resolveWhisperModel(s) ?? s.whisperModel
   return {
     modelPath: whisperModelPath(model),
-    useGpu: s.useGpu,
     language: s.language,
     vocabulary: s.vocabulary
   }
@@ -107,6 +98,10 @@ const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 let overlayWin: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
 let overlayHideTimer: ReturnType<typeof setTimeout> | null = null
+// Bannière d'erreur à l'écran : tant que ce timer tourne, la fenêtre overlay reste affichée (le toast
+// gère lui-même son masquage) et hideOverlay ne la cache pas prématurément.
+let overlayToastTimer: ReturnType<typeof setTimeout> | null = null
+const OVERLAY_TOAST_MS = 2700
 let isQuitting = false
 
 type PipelineState = 'idle' | 'recording' | 'processing'
@@ -114,6 +109,21 @@ let state: PipelineState = 'idle'
 // Génération de dictée : incrémentée à chaque début ET à chaque annulation (Échap). runPipeline
 // capture sa génération au départ et abandonne si elle a changé entre-temps (dictée annulée).
 let dictationGen = 0
+// Filet : après le relâchement, on attend l'audio de l'overlay. S'il n'arrive JAMAIS (renderer
+// overlay planté, exception dans finalize…), on ne reste pas coincé en "processing" à vie.
+let audioWaitTimer: ReturnType<typeof setTimeout> | null = null
+const AUDIO_WAIT_MS = 12000
+function clearAudioWait(): void {
+  if (audioWaitTimer) {
+    clearTimeout(audioWaitTimer)
+    audioWaitTimer = null
+  }
+}
+// Durée de MAINTIEN de la touche (mesurée au relâchement). Sert à distinguer un vrai essai de dictée
+// d'un appui accidentel quand la transcription ne rend aucun texte — la longueur de l'audio ne suffit
+// pas (le VAD réduit le silence à zéro, donc on ne saurait pas que l'utilisateur a tenu la touche).
+let recordStartAt = 0
+let lastRecordMs = 0
 // Une MAJ est devenue prête pendant une dictée : on amènera l'écran de MAJ au premier plan dès que
 // le pipeline revient à l'idle (pour ne pas voler le focus de l'app cible en pleine dictée).
 let pendingUpdateReveal = false
@@ -175,12 +185,18 @@ function showOverlay(): void {
     clearTimeout(overlayHideTimer)
     overlayHideTimer = null
   }
+  if (overlayToastTimer) {
+    // une dictée démarre pendant qu'un toast d'erreur s'affichait : on annule son masquage différé
+    clearTimeout(overlayToastTimer)
+    overlayToastTimer = null
+  }
   positionOverlay()
   overlayWin.showInactive() // affiche SANS prendre le focus
 }
 
 function hideOverlay(): void {
   if (!overlayWin) return
+  if (overlayToastTimer) return // un toast d'erreur est à l'écran : il gère lui-même son masquage
   // L'animation de sortie est jouée par l'overlay sur l'event state 'idle' ; on masque
   // réellement la fenêtre une fois la descente terminée (~240 ms).
   if (overlayHideTimer) clearTimeout(overlayHideTimer)
@@ -188,6 +204,29 @@ function hideOverlay(): void {
     overlayWin?.hide()
     overlayHideTimer = null
   }, 260)
+}
+
+/**
+ * Bannière d'erreur À L'ÉCRAN (sous le curseur), via la fenêtre overlay : une pilule façon Dynamic
+ * Island, un peu plus large, avec le message. Visible où l'utilisateur travaille (pas seulement dans
+ * les Réglages). Miroir in-app (toast) si la fenêtre Réglages est ouverte.
+ */
+function overlayToast(message: string): void {
+  settingsWin?.webContents.send('toast', message) // miroir si la fenêtre Réglages est ouverte
+  if (!overlayWin) return
+  if (overlayHideTimer) {
+    clearTimeout(overlayHideTimer)
+    overlayHideTimer = null
+  }
+  if (overlayToastTimer) clearTimeout(overlayToastTimer)
+  positionOverlay()
+  overlayWin.showInactive()
+  sendOverlay('overlay:toast', message)
+  // garde la fenêtre affichée le temps du toast (entrée + maintien + sortie ~240 ms), puis masque.
+  overlayToastTimer = setTimeout(() => {
+    overlayToastTimer = null
+    overlayWin?.hide()
+  }, OVERLAY_TOAST_MS)
 }
 
 function sendOverlay(channel: string, payload?: unknown): void {
@@ -250,6 +289,42 @@ function toast(message: string, opts?: { onClick?: () => void }): void {
 
 // ─────────────────────────────────────────────────────── pipeline vocal ──
 
+// Watchdog : sentinelle renvoyée quand une étape dépasse son budget de temps. Filet ultime contre
+// un serveur GPU figé / une transcription qui s'éternise — sans ça, l'app resterait coincée en
+// "processing" à vie (le bug "ça tourne en boucle à l'infini").
+const TIMEOUT = Symbol('timeout')
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMEOUT> {
+  let t: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<typeof TIMEOUT>((resolve) => {
+    t = setTimeout(() => resolve(TIMEOUT), ms)
+  })
+  const guarded = p.then(
+    (v) => {
+      if (t) clearTimeout(t)
+      return v
+    },
+    (e) => {
+      if (t) clearTimeout(t)
+      throw e
+    }
+  )
+  // Empêche un rejet TARDIF du perdant (tâche orpheline qui échoue APRÈS le timeout — ex. le serveur
+  // GPU tué par recoverFromHang fait échouer son fetch encore en vol) de devenir un unhandledRejection.
+  void guarded.catch(() => {})
+  return Promise.race([guarded, timeout])
+}
+// Filet ultime de la transcription : au-delà on abandonne et on rend la main. PROPORTIONNEL à la
+// durée (large) pour ne JAMAIS couper une transcription qui progresse — en usage normal (GPU) une
+// dictée revient en quelques secondes ; ce délai ne sert que si le repli CPU s'éternise vraiment
+// sur un très long passage (audio non annulable). Plancher 2 min, plafond 6 min.
+function transcribeWatchdogMs(samples: number, sampleRate = 16000): number {
+  const seconds = samples / sampleRate
+  return Math.min(360000, Math.max(120000, Math.round(seconds * 2000) + 90000))
+}
+// La dictée au curseur n'a pas vocation à durer très longtemps : au-delà on tronque (la qualité de
+// Whisper se dégrade et le CPU s'éternise). 300 s = 5 min — large pour un usage normal.
+const MAX_AUDIO_SAMPLES = 16000 * 300
+
 function onRecordStart(): void {
   if (state !== 'idle') return
   const s = getSettings()
@@ -258,7 +333,14 @@ function onRecordStart(): void {
     openSettings()
     return
   }
+  if (!isGpuBinPresent()) {
+    // Transcription 100 % GPU : sans moteur GPU installé, on ne peut rien faire (plus de repli CPU).
+    toast('Moteur GPU manquant — installe-le dans les Réglages.')
+    openSettings()
+    return
+  }
   dictationGen++ // nouvelle dictée (toute génération antérieure devient obsolète)
+  recordStartAt = Date.now()
   state = 'recording'
   showOverlay()
   sendOverlay('record:start')
@@ -281,6 +363,7 @@ function onRecordStart(): void {
 
 function onRecordStop(): void {
   if (state !== 'recording') return
+  lastRecordMs = Date.now() - recordStartAt
   state = 'processing'
   restoreSystemAudio() // rétablit le son système avant de jouer le son de fermeture
   // Son de fermeture (MP3 inversé) IMMÉDIAT au relâchement — pas après la transcription/IA
@@ -288,6 +371,19 @@ function onRecordStop(): void {
   playSound('done')
   sendOverlay('state', 'processing')
   sendOverlay('record:stop') // l'overlay renverra ensuite 'audio:data'
+  // Garde-fou : si 'audio:data' n'arrive jamais (overlay planté/exception), on rend la main.
+  clearAudioWait()
+  audioWaitTimer = setTimeout(() => {
+    audioWaitTimer = null
+    if (state !== 'processing') return
+    log.warn('onRecordStop: aucun audio reçu après le relâchement — récupération forcée')
+    dictationGen++ // un audio tardif éventuel sera ignoré (state revenu à idle)
+    playSound('error')
+    overlayToast('Problème micro — réessaie')
+    restoreSystemAudio()
+    state = 'idle'
+    sendOverlay('state', 'idle')
+  }, AUDIO_WAIT_MS)
 }
 
 /**
@@ -297,6 +393,7 @@ function onRecordStop(): void {
 function cancelDictation(): void {
   if (state === 'idle') return
   dictationGen++ // invalide tout runPipeline en cours (il abandonnera avant d'injecter)
+  clearAudioWait()
   muteArmed = false
   restoreSystemAudio()
   // Pas de son ici : l'annulation est volontaire (un buzzer d'erreur induirait en erreur) ;
@@ -312,11 +409,30 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
   if (state !== 'processing') return
   const gen = dictationGen // capture la génération : si elle change, la dictée a été annulée
   const s = getSettings()
+  // Borne la durée : un audio très long fait s'éterniser la transcription (surtout en repli CPU).
+  let pcmIn = pcm
+  if (pcmIn.length > MAX_AUDIO_SAMPLES) {
+    pcmIn = pcmIn.subarray(0, MAX_AUDIO_SAMPLES)
+    toast('Dictée très longue : tronquée à 5 min pour rester fiable.')
+  }
   try {
-    const backend = await ensureEngine(engineConfig())
-    notifyBackend(backend)
-    let text = await transcribe(pcm, s.language)
+    await ensureEngine(engineConfig())
+    const transcribed = await withTimeout(transcribe(pcmIn), transcribeWatchdogMs(pcmIn.length))
     if (gen !== dictationGen) return // annulée pendant la transcription
+    if (transcribed === TIMEOUT) {
+      // La transcription ne rend pas la main (repli CPU non annulable sur un audio très long) : on
+      // abandonne pour ne JAMAIS rester coincé en "processing". On invalide la tâche orpheline (pas
+      // d'injection tardive si elle finit plus tard), on remet le moteur d'aplomb et on rend la main.
+      dictationGen++
+      void recoverFromHang()
+      playSound('error')
+      overlayToast('Trop long — abandonné')
+      restoreSystemAudio()
+      state = 'idle'
+      sendOverlay('state', 'idle')
+      return
+    }
+    let text = transcribed
 
     // Passe déterministe : retire euh/hum/bégaiements MÊME sans LLM (texte propre par défaut).
     if (text) text = stripDisfluencies(text)
@@ -332,15 +448,26 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
           // Dictionnaire autoritaire : on réapplique APRÈS le LLM (qui a pu re-casser un terme).
           text = applyReplacements(text, s.replacements)
         }
-      } catch {
-        /* on garde le texte brut si le nettoyage échoue */
+      } catch (e) {
+        log.warn('nettoyage LLM échoué (texte brut conservé)', e)
       }
     }
     if (gen !== dictationGen) return // annulée pendant le nettoyage LLM
 
     if (text) {
       lastTranscript = text
-      await injectText(text, s.injectMode, s.keepOnClipboard)
+      try {
+        await injectText(text, s.injectMode, s.keepOnClipboard)
+      } catch (e) {
+        // Injection refusée (fenêtre admin/élevée, RDP, jeu plein écran…) : le texte est SAUVÉ dans le
+        // presse-papiers (inject.ts ne restaure pas en cas d'échec) → collable à la main. On ne ment pas
+        // avec « Erreur de transcription » : la transcription a réussi, c'est l'écriture qui a échoué.
+        log.warn('injection échouée', e)
+        clipboard.writeText(text)
+        playSound('error')
+        overlayToast('Texte non inséré — colle avec Ctrl+V')
+      }
+      // Historique enregistré MÊME si l'injection a échoué (le texte n'est pas perdu).
       if (s.keepHistory) {
         addHistory(text, resolveWhisperModel(s) ?? s.whisperModel)
         settingsWin?.webContents.send('history:changed') // rafraîchit la liste si la fenêtre est ouverte
@@ -348,11 +475,20 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
       rebuildTrayMenu() // active "Copier / Annuler la dernière dictée" + sous-menu "Récent"
       // (pas de son ici : le son de fermeture a déjà été joué au relâchement ;
       //  l'overlay reste visible "Transcription…" puis sort à l'état idle dans finally)
+    } else {
+      // Aucun texte produit. On se base sur la DURÉE DE MAINTIEN de la touche (pas sur la longueur de
+      // l'audio, que le VAD a pu réduire à zéro sur du silence) : si l'utilisateur a tenu la touche un
+      // temps réel (> 0,8 s), on le SIGNALE — sinon (appui accidentel court) on reste silencieux.
+      if (lastRecordMs > 800) {
+        playSound('error')
+        overlayToast('Rien entendu — parle plus fort')
+      }
     }
   } catch (err) {
     if (gen !== dictationGen) return // annulée : on ne signale pas l'erreur
+    log.warn('pipeline: erreur de transcription', err)
     playSound('error')
-    toast('Erreur de transcription : ' + (err instanceof Error ? err.message : String(err)))
+    overlayToast('Erreur de transcription')
   } finally {
     // Si la dictée a été annulée entre-temps, cancelDictation a déjà tout remis à idle : ne pas
     // ré-toucher l'état (une nouvelle dictée a peut-être déjà démarré).
@@ -375,6 +511,7 @@ async function runPipeline(pcm: Float32Array): Promise<void> {
 function applySettings(): void {
   const s = getSettings()
   setHotkey(s.hotkey)
+  setCancelHotkey(s.cancelHotkey)
   setActivationMode(s.activationMode)
   app.setLoginItemSettings({ openAtLogin: s.launchAtLogin })
   // (Pré)chauffe ou met en veille le sidecar de coupure du son système selon le réglage.
@@ -397,6 +534,7 @@ function preloadModels(): void {
 
 function registerIpc(): void {
   ipcMain.on('audio:data', (_e, data: Float32Array | ArrayBuffer | number[]) => {
+    clearAudioWait() // l'audio est arrivé : on désarme le filet de onRecordStop
     let pcm: Float32Array
     if (data instanceof Float32Array) pcm = data
     else if (data instanceof ArrayBuffer) pcm = new Float32Array(data)
@@ -435,7 +573,10 @@ function registerIpc(): void {
       approxBytes: LLM_MODEL.approxBytes,
       present: isPresent(LLM_MODEL)
     },
-    gpu: { present: isGpuBinPresent(), engine: resolveWhisperEngine(), vendor: detectGpuVendor() }
+    gpu: { present: isGpuBinPresent(), engine: resolveWhisperEngine(), vendor: detectGpuVendor() },
+    // Modèle whisper RÉELLEMENT utilisé (le choix s'il est présent, sinon le repli) : permet à l'UI
+    // de prévenir quand le modèle choisi est absent et qu'un autre tourne à sa place.
+    resolved: resolveWhisperModel(getSettings())
   }))
 
   ipcMain.handle('models:download', async (_e, kind: string) => {
@@ -448,6 +589,7 @@ function registerIpc(): void {
       return { ok: true }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      log.warn('téléchargement échoué', kind, err)
       send({ kind, received: 0, total: 0, percent: 0, done: true, error: message })
       return { ok: false, error: message }
     }
@@ -485,17 +627,24 @@ function registerIpc(): void {
     }
     // Script détaché : attend la fermeture de l'app (2 s), supprime données + cache, puis lance le
     // désinstalleur NSIS en silence (retire l'app de Program Files + le registre + les raccourcis).
+    // Chemins passés en VARIABLES D'ENVIRONNEMENT (jamais interpolés dans la commande) : robuste aux
+    // apostrophes dans le nom d'utilisateur (C:\Users\O'Brien\…) et insensible à l'injection PowerShell.
     const ps =
       `Start-Sleep -Seconds 2; ` +
-      `Remove-Item -LiteralPath '${userData}','${updaterCache}' -Recurse -Force -ErrorAction SilentlyContinue; ` +
-      (uninstaller
-        ? `Start-Process -FilePath '${uninstaller}' -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue`
-        : '')
+      `$p = @($env:VENTA_USERDATA, $env:VENTA_UPDATER) | Where-Object { $_ }; ` +
+      `if ($p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }; ` +
+      `if ($env:VENTA_UNINST) { Start-Process -FilePath $env:VENTA_UNINST -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue }`
     try {
       spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
         detached: true,
         stdio: 'ignore',
-        windowsHide: true
+        windowsHide: true,
+        env: {
+          ...process.env,
+          VENTA_USERDATA: userData,
+          VENTA_UPDATER: updaterCache,
+          VENTA_UNINST: uninstaller || ''
+        }
       }).unref()
     } catch {
       /* noop */
@@ -565,6 +714,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => openSettings())
 
   app.whenReady().then(() => {
+    log.install(app.getVersion()) // journal persistant + capture des rejets/exceptions non gérés
     // autorise le micro pour nos fenêtres
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
       cb(permission === 'media')

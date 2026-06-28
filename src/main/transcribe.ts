@@ -1,53 +1,44 @@
 import os from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import type { Whisper as WhisperInstance, TranscribeParams } from 'smart-whisper'
 import { whisperServerExe } from './models'
 
 const N_THREADS = Math.max(2, Math.min(os.cpus().length, 8))
 const HOST = '127.0.0.1'
 const PORT = 8917
-// Garde-fou : si le serveur whisper fige, on abandonne le fetch pour basculer en CPU
-// (sinon l'app reste coincée en "processing" à vie).
-const INFERENCE_TIMEOUT_MS = 20000
+// Garde-fou : si le serveur GPU fige, on abandonne le fetch (sinon l'app reste coincée en
+// "processing" à vie). Le délai est PROPORTIONNEL à la durée de l'audio : une longue dictée prend
+// légitimement plus de temps — un délai fixe trop court échouerait à tort. 2× le temps réel : un
+// GPU qui marche ne l'atteint JAMAIS (whisper.cpp est plus rapide que le temps réel, même un iGPU
+// Vulkan modeste) ; ce budget ne sert qu'à détecter un serveur RÉELLEMENT figé. Plancher 30 s,
+// plafond 3 min. (Il n'y a PAS de repli CPU : trop lent — supprimé volontairement.)
+const INFERENCE_TIMEOUT_MIN_MS = 30000
+const INFERENCE_TIMEOUT_MAX_MS = 180000
+/** Budget d'attente du serveur GPU selon la durée de l'audio (plancher 30 s, plafond 3 min). */
+export function gpuTimeoutMs(samples: number, sampleRate = 16000): number {
+  const seconds = samples / sampleRate
+  return Math.min(
+    INFERENCE_TIMEOUT_MAX_MS,
+    Math.max(INFERENCE_TIMEOUT_MIN_MS, Math.round(seconds * 2000))
+  )
+}
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export interface EngineConfig {
   modelPath: string
-  useGpu: boolean
   language: string
   vocabulary: string
 }
 
-type Backend = 'gpu' | 'cpu' | null
+type Backend = 'gpu' | null
 let backend: Backend = null
 let currentModel: string | null = null
 let currentCfg: EngineConfig | null = null
 
-// ── moteur GPU : whisper-server (CUDA) en sidecar, modèle gardé en VRAM ──
+// ── moteur GPU : whisper-server (CUDA NVIDIA / Vulkan AMD-Intel) en sidecar, modèle en VRAM ──
+// Pas de moteur CPU : la transcription est 100 % GPU (le repli CPU smart-whisper était trop lent).
 let server: ChildProcess | null = null
 let serverSig: string | null = null
-
-// ── moteur CPU : smart-whisper (repli) ──
-let cpu: WhisperInstance | null = null
-
-// smart-whisper charge un addon natif (whisper.cpp) qui imprime ses logs sur stderr SAUF si
-// NODE_ENV === 'production' à l'init de l'addon. On l'importe DYNAMIQUEMENT (au repli CPU seulement)
-// avec NODE_ENV forcé le temps du chargement → plus de logs ggml/whisper qui fuient dans le terminal.
-let smartWhisper: typeof import('smart-whisper') | null = null
-async function loadSmartWhisper(): Promise<typeof import('smart-whisper')> {
-  if (!smartWhisper) {
-    const prev = process.env.NODE_ENV
-    process.env.NODE_ENV = 'production'
-    try {
-      smartWhisper = await import('smart-whisper')
-    } finally {
-      if (prev === undefined) delete process.env.NODE_ENV
-      else process.env.NODE_ENV = prev
-    }
-  }
-  return smartWhisper
-}
 
 /** Initial prompt : biais ponctuation/casse + vocabulaire. Poussé même SANS vocabulaire
  *  (le biais de ponctuation est gratuit et améliore casse/ponctuation par défaut). */
@@ -72,23 +63,21 @@ function serverArgs(cfg: EngineConfig): string[] {
   return args
 }
 
-/** Prépare le moteur. GPU (serveur) si demandé + binaire présent, sinon repli CPU. */
+/**
+ * Prépare le moteur GPU (whisper-server). Lève une erreur si le moteur GPU n'est pas installé ou
+ * ne démarre pas — il n'y a PAS de repli CPU (volontairement retiré : trop lent). Le pipeline
+ * affichera alors un message d'erreur.
+ */
 export async function ensureEngine(cfg: EngineConfig): Promise<Backend> {
   currentCfg = cfg
-  if (cfg.useGpu && existsSync(whisperServerExe())) {
-    try {
-      await ensureServer(cfg)
-      backend = 'gpu'
-      currentModel = cfg.modelPath
-      return 'gpu'
-    } catch {
-      await stopServer() // le serveur n'a pas démarré -> repli CPU
-    }
+  if (!existsSync(whisperServerExe())) {
+    backend = null
+    throw new Error('Moteur GPU non installé — télécharge-le dans les Réglages.')
   }
-  await ensureCpu(cfg.modelPath)
-  backend = 'cpu'
+  await ensureServer(cfg)
+  backend = 'gpu'
   currentModel = cfg.modelPath
-  return 'cpu'
+  return 'gpu'
 }
 
 export function activeBackend(): Backend {
@@ -135,34 +124,23 @@ async function stopServer(): Promise<void> {
   serverSig = null
 }
 
-async function ensureCpu(modelPath: string): Promise<void> {
-  if (cpu && currentModel === modelPath) return
-  if (cpu) {
-    await cpu.free()
-    cpu = null
-  }
-  const { Whisper } = await loadSmartWhisper()
-  cpu = new Whisper(modelPath, { gpu: false })
-}
-
 export function isLoaded(): boolean {
   return backend !== null
 }
 
-/** Transcrit un PCM Float32 mono 16 kHz -> texte brut. */
-export async function transcribe(pcm: Float32Array, language: string): Promise<string> {
+/** Transcrit un PCM Float32 mono 16 kHz -> texte brut (GPU uniquement). */
+export async function transcribe(pcm: Float32Array): Promise<string> {
   if (pcm.length < 16000 * 0.25) return '' // < 0,25 s : ignore (appui accidentel)
-
-  if (backend === 'gpu') {
-    try {
-      return await transcribeGpu(pcm)
-    } catch {
-      if (currentModel) await ensureCpu(currentModel)
-      backend = 'cpu'
-      return transcribeCpu(pcm, language)
-    }
+  try {
+    return await transcribeGpu(pcm)
+  } catch (err) {
+    // Serveur GPU figé ou en erreur : on le TUE (process séparé -> sûr) pour qu'une requête bloquée
+    // ne mette pas les dictées suivantes en file derrière elle ; la prochaine en relancera un frais
+    // via ensureEngine. Pas de repli CPU : on remonte l'erreur (le pipeline affichera un message).
+    await stopServer()
+    backend = null
+    throw err
   }
-  return transcribeCpu(pcm, language)
 }
 
 async function transcribeGpu(pcm: Float32Array): Promise<string> {
@@ -172,9 +150,9 @@ async function transcribeGpu(pcm: Float32Array): Promise<string> {
   form.append('response_format', 'text')
   form.append('temperature', '0') // déterministe (langue/seuils gérés au lancement du serveur)
 
-  // Timeout : si le serveur fige, on abort -> le catch de transcribe() bascule en CPU.
+  // Timeout (proportionnel à la durée de l'audio) : si le serveur fige, on abort -> erreur remontée.
   const ctl = new AbortController()
-  const timer = setTimeout(() => ctl.abort(), INFERENCE_TIMEOUT_MS)
+  const timer = setTimeout(() => ctl.abort(), gpuTimeoutMs(pcm.length))
   try {
     const res = await fetch(`http://${HOST}:${PORT}/inference`, { method: 'POST', body: form, signal: ctl.signal })
     if (!res.ok) throw new Error('inference HTTP ' + res.status)
@@ -184,41 +162,22 @@ async function transcribeGpu(pcm: Float32Array): Promise<string> {
   }
 }
 
-async function transcribeCpu(pcm: Float32Array, language: string): Promise<string> {
-  if (!cpu) throw new Error('moteur CPU non chargé')
-  const { WhisperSamplingStrategy } = await loadSmartWhisper()
-  const lang = currentCfg?.language || language || 'auto'
-  // Repli CPU aligné sur le GPU : même beam search, suppression non-vocale, seuil entropie,
-  // prompt (ponctuation + vocabulaire) et plafond de contexte -> qualité homogène en mode dégradé.
-  const params: Partial<TranscribeParams> = {
-    language: lang && lang !== 'auto' ? lang : 'auto',
-    n_threads: N_THREADS,
-    strategy: WhisperSamplingStrategy.WHISPER_SAMPLING_BEAM_SEARCH,
-    beam_size: 5,
-    suppress_non_speech_tokens: true,
-    entropy_thold: 2.6,
-    temperature: 0,
-    n_max_text_ctx: 64,
-    initial_prompt: initialPrompt({ language: lang, vocabulary: currentCfg?.vocabulary })
-  }
-  const task = await cpu.transcribe(pcm, params)
-  const segments = await task.result
-  return segments
-    .map((s) => s.text)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 export async function freeWhisper(): Promise<void> {
   await stopServer()
-  if (cpu) {
-    await cpu.free()
-    cpu = null
-  }
   backend = null
   currentModel = null
   currentCfg = null
+}
+
+/**
+ * Remet le moteur d'aplomb après un ABANDON (watchdog du pipeline qui a coupé une transcription
+ * trop longue). Tue le sidecar GPU figé (process séparé -> sûr). La prochaine dictée réinitialise
+ * tout proprement via ensureEngine (backend remis à null).
+ */
+export async function recoverFromHang(): Promise<void> {
+  await stopServer()
+  backend = null
+  currentModel = null
 }
 
 /** Construit un WAV PCM 16-bit mono à partir du Float32. */

@@ -1,6 +1,6 @@
 {
   "name": "ventatalk",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "VentaTalk — dictée vocale système locale (clone de Wispr Flow) : whisper.cpp + LLM local, 100% hors-ligne.",
   "main": "./out/main/index.js",
   "author": "VentaTalk",
@@ -21,7 +21,6 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
     "node-llama-cpp": "^3.18.0",
-    "smart-whisper": "^0.8.1",
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {

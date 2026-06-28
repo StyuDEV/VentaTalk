@@ -77,6 +77,22 @@ v.onModelProgress((p: Progress) => {
   updateBar(wizardBars.get(p.kind), p)
 })
 
+// Icône d'avertissement (bandeaux ambre `.hist-notice`).
+const WARN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>`
+
+// Présence du modèle LLM de nettoyage (mise à jour par renderModels) : sert au bandeau d'alerte
+// quand « Nettoyage IA » est activé sans modèle installé (sinon le toggle est ON mais ne fait rien).
+let llmPresent = false
+function updateAiNotice(): void {
+  const el = document.getElementById('aiNotice')
+  if (!el) return
+  const on = (document.getElementById('aiCleanup') as HTMLInputElement | null)?.checked
+  el.innerHTML =
+    on && !llmPresent
+      ? `<div class="hist-notice">${WARN_SVG}<span>Le nettoyage IA est activé mais son modèle n'est pas installé — télécharge-le ci-dessous, sinon le texte est inséré sans correction.</span></div>`
+      : ''
+}
+
 async function renderModels(): Promise<void> {
   const status = await v.modelsStatus()
   const settings = await v.getSettings()
@@ -106,8 +122,22 @@ async function renderModels(): Promise<void> {
     progressBars.set(m.id, wrap.querySelector('[data-prog]') as HTMLElement)
   }
 
+  // Modèle RÉELLEMENT utilisé : si le modèle choisi n'est pas téléchargé, le main retombe sur un autre
+  // (resolveWhisperModel). On le signale pour que l'utilisateur sache que ce n'est pas son choix qui tourne.
+  const resolved = status.resolved as string | null
+  if (resolved && resolved !== settings.whisperModel) {
+    const chosen = WHISPER_LABELS[settings.whisperModel] ?? settings.whisperModel
+    const used = WHISPER_LABELS[resolved] ?? resolved
+    container.insertAdjacentHTML(
+      'afterbegin',
+      `<div class="hist-notice">${WARN_SVG}<span>« ${chosen} » n'est pas téléchargé → « ${used} » est utilisé à la place. Télécharge ton modèle préféré ci-dessous.</span></div>`
+    )
+  }
+
   // ── LLM ──
   const llm = status.llm as { id: string; approxBytes: number; present: boolean }
+  llmPresent = llm.present
+  updateAiNotice()
   $('llmModel').innerHTML = `
     <div class="model">
       <div class="model-head">
@@ -145,6 +175,16 @@ async function renderModels(): Promise<void> {
       <div class="progress" data-prog="whisper-gpu"><i></i></div>
     </div>`
   progressBars.set('whisper-gpu', $('gpuEngine').querySelector('[data-prog]') as HTMLElement)
+
+  // Écrit la carte DÉTECTÉE dans l'option « Automatique » des sélecteurs de moteur (réglages + assistant),
+  // sinon l'utilisateur ne voit pas quelle carte/moteur l'auto-détection a choisi.
+  const vendorName =
+    gpu.vendor === 'nvidia' ? 'NVIDIA' : gpu.vendor === 'amd' ? 'AMD' : gpu.vendor === 'intel' ? 'Intel' : ''
+  const engShort = gpu.engine === 'cuda' ? 'CUDA' : 'Vulkan'
+  const autoLabel = vendorName ? `Automatique — ${vendorName} · ${engShort}` : `Automatique — ${engShort}`
+  document
+    .querySelectorAll<HTMLOptionElement>('#whisperEngine option[value="auto"], #wzWhisperEngine option[value="auto"]')
+    .forEach((o) => (o.textContent = autoLabel))
 
   // radio modèle actif
   document.querySelectorAll<HTMLInputElement>('input[name="whisperModel"]').forEach((r) => {
@@ -675,13 +715,14 @@ async function init(): Promise<void> {
     })
   }
 
-  // raccourci
+  // raccourci (+ annulation, déclarés tôt pour le contrôle anti-conflit croisé)
   let currentHotkey = s.hotkey
+  let currentCancel = s.cancelHotkey
   const hotkeyDisplay = $('hotkeyDisplay') as HTMLSpanElement
   const captureBtn = $('hotkeyCapture') as HTMLButtonElement
   const presetsEl = $('hotkeyPresets')
   const PRESETS = ['F9', 'F8', 'Alt+Space', 'Ctrl+Space', 'Alt+Shift']
-  const fmtCombo = (c: string): string => c.replace(/Space/g, 'Espace')
+  const fmtCombo = (c: string): string => c.replace(/Space/g, 'Espace').replace(/Escape/g, 'Échap')
   const showHotkey = (c: string): void => {
     currentHotkey = c
     hotkeyDisplay.textContent = fmtCombo(c)
@@ -711,6 +752,10 @@ async function init(): Promise<void> {
       // Touche textuelle seule : elle s'écrirait dans le texte (uiohook ne peut pas l'avaler) → refus.
       showHotkey(currentHotkey)
       showToast('« ' + fmtCombo(captured) + ' » s’écrirait dans ton texte. Ajoute Ctrl/Alt/Maj ou une touche F1–F12.')
+    } else if (captured && captured === currentCancel) {
+      // Conflit : c'est déjà le raccourci d'annulation.
+      showHotkey(currentHotkey)
+      showToast('Cette touche est déjà ton raccourci d’annulation. Choisis-en une autre.')
     } else if (captured) {
       await v.setSettings({ hotkey: captured })
       showHotkey(captured)
@@ -718,6 +763,42 @@ async function init(): Promise<void> {
     } else {
       showHotkey(currentHotkey)
       showToast('Aucune combinaison détectée')
+    }
+  })
+
+  // raccourci d'annulation (même mécanique de capture, mêmes garde-fous : pas de touche textuelle
+  // seule — uiohook ne peut pas l'avaler — et pas le même raccourci que la dictée).
+  const cancelDisplay = $('cancelDisplay') as HTMLSpanElement
+  const cancelCaptureBtn = $('cancelCapture') as HTMLButtonElement
+  const showCancel = (c: string): void => {
+    currentCancel = c
+    cancelDisplay.textContent = fmtCombo(c)
+  }
+  showCancel(s.cancelHotkey)
+  cancelCaptureBtn.addEventListener('click', async () => {
+    const label = cancelCaptureBtn.textContent
+    cancelCaptureBtn.disabled = true
+    cancelCaptureBtn.textContent = 'Appuie sur la touche…'
+    cancelDisplay.textContent = '…'
+    cancelDisplay.classList.add('capturing')
+    const captured = await v.captureHotkey()
+    cancelDisplay.classList.remove('capturing')
+    cancelCaptureBtn.disabled = false
+    cancelCaptureBtn.textContent = label || 'Changer…'
+    if (captured && comboWritesChar(captured)) {
+      showCancel(currentCancel)
+      showToast('« ' + fmtCombo(captured) + ' » s’écrirait dans ton texte. Ajoute Ctrl/Alt/Maj ou une touche F1–F12.')
+    } else if (captured && captured === currentHotkey) {
+      // Conflit : c'est déjà le raccourci de dictée.
+      showCancel(currentCancel)
+      showToast('Cette touche est déjà ton raccourci de dictée. Choisis-en une autre.')
+    } else if (captured) {
+      await v.setSettings({ cancelHotkey: captured })
+      showCancel(captured)
+      showToast('Annulation : ' + fmtCombo(captured))
+    } else {
+      showCancel(currentCancel)
+      showToast('Aucune touche détectée')
     }
   })
 
@@ -752,7 +833,6 @@ async function init(): Promise<void> {
       if (key === 'keepHistory') void renderHistory() // maj du bandeau "désactivé"
     })
   }
-  bindToggle('useGpu', 'useGpu')
 
   // sélecteur de carte graphique (réglages + assistant) : force le moteur whisper, ou auto-détecte
   const bindEngineSelect = (id: string, refresh: () => void): void => {
@@ -772,7 +852,17 @@ async function init(): Promise<void> {
 
   bindToggle('vadEnabled', 'vadEnabled')
   bindToggle('noiseSuppression', 'noiseSuppression')
-  bindToggle('aiCleanup', 'aiCleanup')
+  // « Nettoyage IA » : binding custom (vs bindToggle générique) pour alerter si le modèle est absent.
+  const aiToggle = $('aiCleanup') as HTMLInputElement
+  aiToggle.checked = Boolean(s.aiCleanup)
+  aiToggle.addEventListener('change', () => {
+    void v.setSettings({ aiCleanup: aiToggle.checked })
+    if (aiToggle.checked && !llmPresent) {
+      showToast('Nettoyage IA : télécharge d’abord son modèle (section « Nettoyage IA » ci-dessous).')
+    }
+    updateAiNotice()
+  })
+  updateAiNotice()
   bindToggle('keepOnClipboard', 'keepOnClipboard')
   bindToggle('launchAtLogin', 'launchAtLogin')
   bindToggle('soundFeedback', 'soundFeedback')

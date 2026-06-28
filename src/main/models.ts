@@ -114,7 +114,8 @@ export async function downloadModel(
     throw new Error(`Téléchargement échoué (${res.status}) pour ${info.url}`)
   }
 
-  const total = Number(res.headers.get('content-length')) || info.approxBytes
+  const contentLength = Number(res.headers.get('content-length')) || 0
+  const total = contentLength || info.approxBytes
   let received = 0
   let lastEmit = 0
 
@@ -142,6 +143,18 @@ export async function downloadModel(
     nodeStream.pipe(fileStream)
   })
 
+  // Refuse un fichier TRONQUÉ (coupure réseau silencieuse) au lieu de valider un .part incomplet
+  // (qui ferait planter whisper/le LLM au chargement avec une erreur cryptique).
+  if (contentLength && received !== contentLength) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* noop */
+    }
+    throw new Error(
+      `Téléchargement incomplet (${Math.round(received / 1e6)}/${Math.round(contentLength / 1e6)} Mo) — réessaie.`
+    )
+  }
   renameSync(tmp, dest)
   onProgress({ kind, received: total, total, percent: 100, done: true })
 }
@@ -159,7 +172,8 @@ export function cleanupPartial(info: ModelInfo): void {
 
 // ─────────────────────── moteurs GPU whisper (auto-détectés selon la carte) ──
 // NVIDIA → CUDA (le plus rapide) ; AMD/Intel (ou inconnu) → Vulkan (universel, via le pilote
-// système). Repli CPU = smart-whisper (cf. transcribe.ts) si aucun moteur GPU n'est présent.
+// système). La transcription est 100 % GPU : sans moteur GPU installé, la dictée est refusée
+// (plus de repli CPU — il était trop lent).
 
 export type WhisperEngine = 'cuda' | 'vulkan'
 export type GpuVendor = 'nvidia' | 'amd' | 'intel' | 'none'
@@ -270,7 +284,8 @@ async function downloadTo(
 ): Promise<void> {
   const res = await fetch(url, { redirect: 'follow' })
   if (!res.ok || !res.body) throw new Error(`Téléchargement échoué (${res.status})`)
-  const total = Number(res.headers.get('content-length')) || approx
+  const contentLength = Number(res.headers.get('content-length')) || 0
+  const total = contentLength || approx
   let received = 0
   let lastEmit = 0
   const fileStream = createWriteStream(dest)
@@ -295,6 +310,16 @@ async function downloadTo(
     fileStream.on('finish', () => resolve())
     nodeStream.pipe(fileStream)
   })
+
+  // Refuse un zip tronqué (sinon Expand-Archive échoue ensuite avec une erreur obscure).
+  if (contentLength && received !== contentLength) {
+    try {
+      unlinkSync(dest)
+    } catch {
+      /* noop */
+    }
+    throw new Error('Téléchargement du moteur incomplet — réessaie.')
+  }
 }
 
 /** Met whisper-server.exe + ses DLLs à plat dans whisperBinDir (gère un éventuel sous-dossier). */
@@ -322,10 +347,12 @@ export async function ensureWhisperGpuBin(onProgress: (p: DownloadProgress) => v
   const zip = join(tmpdir(), info.file)
   await downloadTo(info.url, zip, 'whisper-gpu', onProgress, info.approxBytes)
 
+  // Chemins via VARIABLES D'ENVIRONNEMENT (jamais interpolés) : robuste aux apostrophes dans le
+  // chemin (C:\Users\O'Brien\…) et insensible à l'injection.
   const res = spawnSync(
     'powershell',
-    ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${dir}' -Force`],
-    { windowsHide: true }
+    ['-NoProfile', '-NonInteractive', '-Command', 'Expand-Archive -LiteralPath $env:VENTA_ZIP -DestinationPath $env:VENTA_DIR -Force'],
+    { windowsHide: true, env: { ...process.env, VENTA_ZIP: zip, VENTA_DIR: dir } }
   )
   if (res.status !== 0) throw new Error('Extraction du moteur GPU échouée')
   flattenBin(dir)

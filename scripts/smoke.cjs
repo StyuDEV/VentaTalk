@@ -17,11 +17,6 @@ app.whenReady().then(async () => {
     if (typeof UiohookKey.F9 !== 'number') throw new Error('UiohookKey absent')
   })
 
-  await test('smart-whisper (require .node)', () => {
-    const { Whisper } = require('smart-whisper')
-    if (typeof Whisper !== 'function') throw new Error('Whisper absent')
-  })
-
   await test('nut-js/libnut (appel natif)', async () => {
     const { clipboard: nutClip } = require('@nut-tree-fork/nut-js')
     await nutClip.getContent() // force le chargement de libnut.node

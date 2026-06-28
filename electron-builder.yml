@@ -27,7 +27,6 @@ files:
 # ils ont besoin de leur structure de fichiers d'origine au runtime (sinon crash).
 asarUnpack:
   - "**/*.node"
-  - "node_modules/smart-whisper/**"
   - "node_modules/node-llama-cpp/**"
   - "node_modules/@node-llama-cpp/**"
   - "node_modules/uiohook-napi/**"

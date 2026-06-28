@@ -55,7 +55,10 @@
       ::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
 
       /* ── coquille ── */
-      .app { display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+      /* 1re rangée = hauteur de la barre de titre (36px) : la sidebar la traverse (pleine hauteur),
+         mais la zone de contenu DÉFILANTE commence en dessous → le contenu ne passe plus jamais
+         sous les boutons Windows (min/agrandir/fermer) en haut à droite. */
+      .app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 36px 1fr; height: 100vh; }
 
       /* barre de titre custom : bande de drag (les contrôles min/agrandir/fermer sont
          dessinés par Windows via titleBarOverlay, en haut à droite). */
@@ -65,6 +68,7 @@
 
       /* ── sidebar ── */
       .sidebar {
+        grid-column: 1; grid-row: 1 / 3; /* pleine hauteur (traverse la rangée barre de titre) */
         background: var(--slate); border-right: 1px solid var(--line);
         display: flex; flex-direction: column; padding: 22px 14px 14px;
       }
@@ -107,7 +111,8 @@
       .uninstall-btn:hover { background: rgba(239, 68, 68, 0.14); border-color: #ef4444; color: #fecaca; }
 
       /* ── contenu ── */
-      .content { overflow-y: auto; padding: 30px 36px 56px; }
+      /* grid-row 2 : commence sous la rangée barre de titre → ne défile jamais sous les contrôles. */
+      .content { grid-column: 2; grid-row: 2; overflow-y: auto; padding: 22px 36px 56px; }
 
       /* ── écran PLEIN « mise à jour en cours » (prend toute la fenêtre) ── */
       #updateScreen {
@@ -149,7 +154,7 @@
       .panel.active { display: block; animation: pageIn 0.26s var(--ease) both; }
       /* Fenêtre large / plein écran : on aère et on élargit un peu la colonne centrée. */
       @media (min-width: 1100px) {
-        .content { padding: 40px 56px 64px; }
+        .content { padding: 30px 56px 64px; }
         .panel { max-width: 680px; }
       }
       @media (min-width: 1500px) {
@@ -462,25 +467,21 @@
         </div>
 
         <nav class="nav" id="nav">
-          <button class="nav-item" data-nav="general">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg>
-            Général
-          </button>
           <button class="nav-item active" data-nav="dictee">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18.5V21"/></svg>
             Dictée
           </button>
-          <button class="nav-item" data-nav="transcription">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
-            Transcription
-          </button>
-          <button class="nav-item" data-nav="ia">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.1L18 9l-4.3 1.9L12 15l-1.7-4.1L6 9l4.3-1.9z"/><path d="M18.5 14l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></svg>
-            Intelligence
+          <button class="nav-item" data-nav="moteur">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2.5V5M15 2.5V5M9 19V21.5M15 19V21.5M2.5 9H5M2.5 15H5M19 9H21.5M19 15H21.5"/></svg>
+            Moteur &amp; modèles
           </button>
           <button class="nav-item" data-nav="historique">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 12a8.8 8.8 0 1 0 2.8-6.5L3 8"/><path d="M3 3.5V8h4.5"/><path d="M12 7.5V12l3 1.8"/></svg>
             Historique
+          </button>
+          <button class="nav-item" data-nav="application">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg>
+            Application
           </button>
         </nav>
 
@@ -499,8 +500,9 @@
       <main class="content">
         <!-- Dictée -->
         <section class="panel active" data-panel="dictee">
-          <div class="panel-head"><h1>Dictée</h1><p>Comment déclencher la dictée et écrire ta voix.</p></div>
-          <div class="group-label">Activation</div>
+          <div class="panel-head"><h1>Dictée</h1><p>Parler et écrire au quotidien — raccourci, voix et écriture.</p></div>
+
+          <div class="group-label">Déclencheur</div>
           <div class="card">
             <div class="row">
               <div class="col">
@@ -514,6 +516,13 @@
               <div class="control"><div class="presets" id="hotkeyPresets"></div></div>
             </div>
             <div class="row">
+              <div class="col">
+                <span class="label">Annulation</span>
+                <span class="hint">Appuie dessus pendant une dictée pour l'annuler (rien n'est écrit).</span>
+              </div>
+              <div class="control"><span id="cancelDisplay" class="kbd">Échap</span><button id="cancelCapture">Changer…</button></div>
+            </div>
+            <div class="row">
               <div class="col"><span class="label">Mode</span><span class="hint">Maintenir, ou appuyer pour basculer.</span></div>
               <div class="control">
                 <div class="seg">
@@ -521,6 +530,26 @@
                   <label><input type="radio" name="mode" value="toggle" /><span>Appuyer</span></label>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div class="group-label">Voix &amp; micro</div>
+          <div class="card">
+            <div class="row">
+              <div class="col"><span class="label">Microphone</span><span class="hint">Périphérique d'entrée pour la dictée.</span></div>
+              <div class="control"><select id="micDevice"><option value="">Par défaut</option></select></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Langue</span><span class="hint">« Auto » détecte la langue parlée.</span></div>
+              <div class="control"><select id="language"></select></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Anti-silence (VAD)</span><span class="hint">Coupe le silence avant l'envoi → supprime le texte fantôme.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="vadEnabled" /><span class="slider"></span></label></div>
+            </div>
+            <div class="row">
+              <div class="col"><span class="label">Réduction de bruit micro</span><span class="hint">À activer seulement en environnement bruyant.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="noiseSuppression" /><span class="slider"></span></label></div>
             </div>
           </div>
 
@@ -540,25 +569,26 @@
               <div class="control"><label class="switch"><input type="checkbox" id="keepOnClipboard" /><span class="slider"></span></label></div>
             </div>
           </div>
-        </section>
 
-        <!-- Transcription -->
-        <section class="panel" data-panel="transcription">
-          <div class="panel-head"><h1>Transcription</h1><p>Le moteur Whisper qui convertit ta voix en texte, 100% en local.</p></div>
-          <div class="group-label">Réglages</div>
+          <div class="group-label">Retours</div>
           <div class="card">
             <div class="row">
-              <div class="col"><span class="label">Langue</span><span class="hint">« Auto » détecte la langue parlée.</span></div>
-              <div class="control"><select id="language"></select></div>
+              <div class="col"><span class="label">Son de confirmation</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="soundFeedback" /><span class="slider"></span></label></div>
             </div>
             <div class="row">
-              <div class="col"><span class="label">Microphone</span><span class="hint">Périphérique d'entrée pour la dictée.</span></div>
-              <div class="control"><select id="micDevice"><option value="">Par défaut</option></select></div>
+              <div class="col"><span class="label">Couper le son du PC pendant la dictée</span><span class="hint">Mute la sortie audio quand tu parles, puis la restaure.</span></div>
+              <div class="control"><label class="switch"><input type="checkbox" id="muteWhileDictating" /><span class="slider"></span></label></div>
             </div>
-            <div class="row">
-              <div class="col"><span class="label">Accélération GPU</span><span class="hint">Utilise le GPU (NVIDIA, AMD ou Intel) — bien plus rapide que le CPU.</span></div>
-              <div class="control"><label class="switch"><input type="checkbox" id="useGpu" /><span class="slider"></span></label></div>
-            </div>
+          </div>
+        </section>
+
+        <!-- Moteur & modèles -->
+        <section class="panel" data-panel="moteur">
+          <div class="panel-head"><h1>Moteur &amp; modèles</h1><p>L'IA locale : moteurs, modèles et qualité du texte — 100% hors-ligne.</p></div>
+
+          <div class="group-label">Matériel</div>
+          <div class="card">
             <div class="row">
               <div class="col"><span class="label">Carte graphique</span><span class="hint">« Automatique » détecte ta carte. Force le moteur si la détection se trompe.</span></div>
               <div class="control"><select id="whisperEngine">
@@ -567,32 +597,19 @@
                 <option value="vulkan">AMD / Intel — Vulkan</option>
               </select></div>
             </div>
-            <div class="row">
-              <div class="col"><span class="label">Anti-silence (VAD)</span><span class="hint">Coupe le silence avant l'envoi → supprime le texte fantôme.</span></div>
-              <div class="control"><label class="switch"><input type="checkbox" id="vadEnabled" /><span class="slider"></span></label></div>
-            </div>
-            <div class="row">
-              <div class="col"><span class="label">Réduction de bruit micro</span><span class="hint">À activer seulement en environnement bruyant.</span></div>
-              <div class="control"><label class="switch"><input type="checkbox" id="noiseSuppression" /><span class="slider"></span></label></div>
-            </div>
           </div>
 
-          <div class="group-label">Moteur GPU</div>
+          <div class="group-label">Transcription (Whisper)</div>
           <div class="card"><div id="gpuEngine"></div></div>
-
-          <div class="group-label">Modèles Whisper</div>
           <div class="card"><div id="whisperModels"></div></div>
-        </section>
 
-        <!-- Intelligence -->
-        <section class="panel" data-panel="ia">
-          <div class="panel-head"><h1>Intelligence</h1><p>Nettoyage du texte et vocabulaire — un LLM local, rien n'est envoyé en ligne.</p></div>
           <div class="group-label">Nettoyage IA</div>
           <div class="card">
             <div class="row">
               <div class="col"><span class="label">Nettoyer le texte</span><span class="hint">Enlève les « euh », ponctue, corrige (LLM local).</span></div>
               <div class="control"><label class="switch"><input type="checkbox" id="aiCleanup" /><span class="slider"></span></label></div>
             </div>
+            <div id="aiNotice"></div>
             <div id="llmModel"></div>
           </div>
 
@@ -610,6 +627,7 @@ git hub=&gt;GitHub"></textarea>
           </div>
         </section>
 
+        <!-- Application -->
         <!-- Historique -->
         <section class="panel" data-panel="historique">
           <div class="panel-head"><h1>Historique</h1><p>Tes 30 dernières dictées, conservées localement.</p></div>
@@ -626,31 +644,24 @@ git hub=&gt;GitHub"></textarea>
           <div id="historyList"></div>
         </section>
 
-        <!-- Général -->
-        <section class="panel" data-panel="general">
-          <div class="panel-head"><h1>Général</h1><p>Démarrage, retours sonores et mises à jour.</p></div>
-          <div class="group-label">Confort</div>
+        <!-- Application -->
+        <section class="panel" data-panel="application">
+          <div class="panel-head"><h1>Application</h1><p>Démarrage, mises à jour et maintenance.</p></div>
+
+          <div class="group-label">Démarrage</div>
           <div class="card">
             <div class="row">
               <div class="col"><span class="label">Lancer au démarrage</span></div>
               <div class="control"><label class="switch"><input type="checkbox" id="launchAtLogin" /><span class="slider"></span></label></div>
             </div>
             <div class="row">
-              <div class="col"><span class="label">Son de confirmation</span></div>
-              <div class="control"><label class="switch"><input type="checkbox" id="soundFeedback" /><span class="slider"></span></label></div>
-            </div>
-            <div class="row">
-              <div class="col"><span class="label">Couper le son du PC pendant la dictée</span><span class="hint">Mute la sortie audio quand tu parles, puis la restaure.</span></div>
-              <div class="control"><label class="switch"><input type="checkbox" id="muteWhileDictating" /><span class="slider"></span></label></div>
-            </div>
-          </div>
-
-          <div class="group-label">Application</div>
-          <div class="card">
-            <div class="row">
               <div class="col"><span class="label">Assistant de configuration</span><span class="hint">Revoir les étapes (moteur GPU, modèle, raccourci).</span></div>
               <div class="control"><button id="onboardingReplay">Revoir</button></div>
             </div>
+          </div>
+
+          <div class="group-label">Mises à jour</div>
+          <div class="card">
             <div class="row">
               <div class="col"><span class="label">Mises à jour</span><span class="hint">Disponibles dans la version installée.</span></div>
               <div class="control"><button id="checkUpdate2">Vérifier maintenant</button></div>

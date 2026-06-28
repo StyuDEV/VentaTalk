@@ -3,6 +3,9 @@
 const hk = require(process.argv[2])
 
 const K = { Ctrl: 29, Alt: 56, Shift: 42, Space: 57, F9: 67, A: 30, Escape: 1 }
+// Keycodes dérivés de la VRAIE table uiohook (= ceux que parseHotkey utilisera) -> pas de devinette.
+const { UiohookKey } = require('uiohook-napi')
+Object.assign(K, { F8: UiohookKey.F8, Q: UiohookKey.Q })
 const ev = (keycode, m = {}) => ({
   keycode,
   ctrlKey: !!m.ctrl,
@@ -169,6 +172,31 @@ function fresh() {
     hk.handleKeyEvent('keyup', ev(K.Escape))
     await p
     check('Échap en capture ne cancel pas', e, [])
+  }
+
+  // L) raccourci d'annulation configurable : après setCancelHotkey('F8'), Échap n'annule plus, F8 oui
+  {
+    const e = fresh()
+    hk.setActivationMode('hold'); hk.setHotkey('F9')
+    hk.setCancelHotkey('F8')
+    hk.handleKeyEvent('keydown', ev(K.Escape)) // ancien défaut : ne doit plus annuler
+    hk.handleKeyEvent('keyup', ev(K.Escape))
+    hk.handleKeyEvent('keydown', ev(K.F8)) // nouveau raccourci : annule
+    check('cancel reconfiguré: Échap inactif, F8 annule', e, ['cancel'])
+    hk.setCancelHotkey('Escape') // restaure le défaut
+  }
+
+  // M) annulation en combo (Ctrl+Q) : une seule annulation par appui (front montant)
+  {
+    const e = fresh()
+    hk.setHotkey('F9')
+    hk.setCancelHotkey('Ctrl+Q')
+    hk.handleKeyEvent('keydown', ev(K.Ctrl, { ctrl: true })) // Ctrl seul : pas encore
+    hk.handleKeyEvent('keydown', ev(K.Q, { ctrl: true })) // Ctrl+Q tenu : 1 annulation
+    hk.handleKeyEvent('keyup', ev(K.Q, { ctrl: true }))
+    hk.handleKeyEvent('keydown', ev(K.Q, { ctrl: true })) // ré-appui : 2e annulation
+    check('combo Ctrl+Q annule une fois par appui', e, ['cancel', 'cancel'])
+    hk.setCancelHotkey('Escape') // restaure le défaut
   }
 
   console.log(failures === 0 ? '\nALL_PASS' : `\n${failures} FAILED`)

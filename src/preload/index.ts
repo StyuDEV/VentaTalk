@@ -17,6 +17,8 @@ export interface VentaApi {
   onState: (cb: (state: 'idle' | 'recording' | 'processing') => void) => void
   onSound: (cb: (kind: 'start' | 'done' | 'error') => void) => void
   onReinitAudio: (cb: () => void) => void
+  /** Bannière d'erreur à l'écran (réutilise la fenêtre overlay) : message court à afficher brièvement. */
+  onOverlayToast: (cb: (message: string) => void) => void
   sendAudio: (pcm: Float32Array) => void
 
   // ── réglages ──
@@ -78,6 +80,7 @@ const api: VentaApi = {
   onState: (cb) => ipcRenderer.on('state', (_e, s) => cb(s)),
   onSound: (cb) => ipcRenderer.on('sound', (_e, k) => cb(k)),
   onReinitAudio: (cb) => ipcRenderer.on('audio:reinit', () => cb()),
+  onOverlayToast: (cb) => ipcRenderer.on('overlay:toast', (_e, m) => cb(m)),
   sendAudio: (pcm) => ipcRenderer.send('audio:data', pcm),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),

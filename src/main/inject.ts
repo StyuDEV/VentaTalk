@@ -19,7 +19,14 @@ export async function injectText(text: string, mode: InjectMode, keepOnClipboard
   if (!text) return
 
   if (mode === 'keystroke') {
-    await keyboard.type(text)
+    try {
+      await keyboard.type(text)
+    } catch (e) {
+      // Frappe refusée (fenêtre élevée/RDP/jeu) : on garde le texte dans le presse-papiers comme
+      // filet anti-perte, puis on remonte l'échec (le pipeline affichera « colle avec Ctrl+V »).
+      clipboard.writeText(text)
+      throw e
+    }
     if (keepOnClipboard) clipboard.writeText(text)
     return
   }
@@ -27,8 +34,15 @@ export async function injectText(text: string, mode: InjectMode, keepOnClipboard
   const previous = clipboard.readText()
   clipboard.writeText(text)
   await delay(40)
-  await keyboard.pressKey(Key.LeftControl, Key.V)
-  await keyboard.releaseKey(Key.LeftControl, Key.V)
+  try {
+    await keyboard.pressKey(Key.LeftControl, Key.V)
+    await keyboard.releaseKey(Key.LeftControl, Key.V)
+  } catch (e) {
+    // Collage refusé : on NE restaure PAS l'ancien presse-papiers → le texte dicté reste collable
+    // à la main. On remonte l'échec pour que le pipeline le signale sans perdre le texte.
+    clipboard.writeText(text)
+    throw e
+  }
   await delay(120)
   // Le presse-papiers contient déjà `text` : on le laisse (keepOnClipboard) ou on restaure.
   if (!keepOnClipboard) clipboard.writeText(previous)

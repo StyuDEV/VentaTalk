@@ -24,7 +24,7 @@ Maintiens un raccourci, parle, relâche → ton texte est transcrit, nettoyé, e
 
 - 🎙️ **Dictée système** — un raccourci global (par défaut **F9**, maintenir), tu parles, le texte
   s'écrit là où est ton curseur. Marche dans **toutes** les apps (navigateur, Word, Discord, terminal…).
-- ⚡ **Rapide** — transcription **whisper.cpp sur GPU** (CUDA, repli CPU), modèle gardé en VRAM (~300 ms).
+- ⚡ **Rapide** — transcription **whisper.cpp sur GPU** (CUDA NVIDIA / Vulkan AMD-Intel), modèle gardé en VRAM (~300 ms).
 - 🧠 **Nettoyage IA local** — un petit LLM (Qwen) enlève les « euh », ponctue et corrige, **sans
   dénaturer ton style** (il garde ton registre, ton argot).
 - 🔒 **Zéro cloud** — moteurs, modèles et historique restent sur ta machine. Aucune télémétrie.
@@ -55,7 +55,7 @@ Raccourci ─▶ capture micro (16 kHz, pré-roll anti-troncature)
 
 ## 🧱 Stack
 
-**Electron** + **electron-vite** (TypeScript) · **whisper.cpp** (transcription GPU/CPU) ·
+**Electron** + **electron-vite** (TypeScript) · **whisper.cpp** (transcription GPU) ·
 **node-llama-cpp** (LLM de nettoyage, GPU Vulkan) · **uiohook-napi** (raccourci global) ·
 **nut-js** (injection texte) · packaging **electron-builder** (installeur NSIS).
 

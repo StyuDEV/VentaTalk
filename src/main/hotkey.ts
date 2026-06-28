@@ -6,7 +6,6 @@ import {
   MOD_KEYCODES,
   MOD_CODES,
   CODE_TO_NAME,
-  NAME_TO_CODE,
   parseHotkey,
   isComboActive,
   activeMods,
@@ -16,12 +15,9 @@ import {
 export interface HotkeyHandlers {
   onStart: () => void
   onStop: () => void
-  /** Échap pressé : annule la dictée en cours (no-op si rien en cours, géré côté index.ts). */
+  /** Raccourci d'annulation pressé : annule la dictée en cours (no-op si rien en cours, géré côté index.ts). */
   onCancel?: () => void
 }
-
-// Keycode de la touche Échap (annulation d'une dictée en cours).
-const ESCAPE_CODE = NAME_TO_CODE['Escape']
 
 interface KeyEvent {
   keycode: number
@@ -35,6 +31,9 @@ interface KeyEvent {
 const pressed = new Set<number>()
 
 let required: ParsedHotkey = parseHotkey('F9')
+// Raccourci d'annulation (configurable). Défaut Échap. Détecté sur le front montant (une fois par appui).
+let cancelRequired: ParsedHotkey = parseHotkey('Escape')
+let cancelWasActive = false
 let handlers: HotkeyHandlers | null = null
 let mode: ActivationMode = 'hold'
 let started = false
@@ -58,6 +57,15 @@ export function setHotkey(str: string): void {
     required = parsed
     wasActive = false
     toggleOn = false
+  }
+}
+
+/** Définit le raccourci d'annulation de la dictée en cours (combo, ex. "Escape", "Ctrl+Q"). */
+export function setCancelHotkey(str: string): void {
+  const parsed = parseHotkey(str)
+  if (parsed.mods.length || parsed.keys.length) {
+    cancelRequired = parsed
+    cancelWasActive = false
   }
 }
 
@@ -147,9 +155,20 @@ export function handleKeyEvent(type: 'keydown' | 'keyup', e: KeyEvent): void {
     }
     return
   }
-  // Échap (appui) -> demande d'annulation de la dictée en cours (index.ts ignore si état idle).
-  if (type === 'keydown' && e.keycode === ESCAPE_CODE) handlers?.onCancel?.()
+  // Raccourci d'annulation -> demande d'annulation de la dictée en cours (index.ts ignore si idle).
+  evaluateCancel()
   evaluate()
+}
+
+/** Front montant du raccourci d'annulation : déclenche onCancel une seule fois par appui. */
+function evaluateCancel(): void {
+  const now = isComboActive(cancelRequired, pressed)
+  if (now && !cancelWasActive) {
+    cancelWasActive = true
+    handlers?.onCancel?.()
+  } else if (!now && cancelWasActive) {
+    cancelWasActive = false
+  }
 }
 
 /**
@@ -188,6 +207,7 @@ export function __reset(): void {
   pressed.clear()
   wasActive = false
   toggleOn = false
+  cancelWasActive = false
   captureMode = false
   capturePeak = null
   captureResolve = null
