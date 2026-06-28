@@ -377,16 +377,20 @@
       }
       #changelog.show { display: flex; animation: fadeIn 0.25s ease; }
       .cl-card {
-        width: 100%; max-width: 460px; background: var(--surface); border: 1px solid var(--line-2);
-        border-radius: 16px; padding: 28px 28px 24px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+        width: 100%; max-width: 460px; max-height: calc(100vh - 80px);
+        display: flex; flex-direction: column;
+        background: var(--surface); border: 1px solid var(--line-2);
+        border-radius: 16px; padding: 26px 28px 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
         animation: pageIn 0.3s var(--ease) both;
       }
-      .cl-title { font-size: 21px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 4px; }
-      .cl-ver { font-family: var(--mono); font-size: 13px; color: var(--accent-2); margin-bottom: 20px; }
-      .cl-list { list-style: none; display: flex; flex-direction: column; gap: 13px; margin-bottom: 24px; }
+      .cl-title { font-size: 21px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 4px; flex: none; }
+      .cl-ver { font-family: var(--mono); font-size: 13px; color: var(--accent-2); margin-bottom: 18px; flex: none; }
+      /* la liste défile si elle est trop longue : le titre reste en haut, le bouton en bas. */
+      .cl-list { list-style: none; display: flex; flex-direction: column; gap: 13px; margin: 0 0 20px;
+        overflow-y: auto; flex: 1 1 auto; min-height: 0; padding-right: 6px; }
       .cl-list li { display: flex; gap: 11px; font-size: 14.5px; line-height: 1.55; }
       .cl-list li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 8px; }
-      .cl-actions { display: flex; }
+      .cl-actions { display: flex; flex: none; }
       .cl-actions button { flex: 1; padding: 12px 16px; font-size: 14.5px; }
       /* ── historique des versions (toutes les notes) ── */
       #histLog {
