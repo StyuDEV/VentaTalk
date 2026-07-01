@@ -2,7 +2,9 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' data:; worker-src 'self' blob: data:" />
+    <!-- script-src SANS data: (un script data: est le vecteur XSS classique) ; le worklet audio
+         (capture-processor.js) est un vrai fichier -> couvert par 'self'. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:" />
     <title>VentaTalk</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }

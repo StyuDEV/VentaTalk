@@ -32,9 +32,17 @@ import {
   resolveWhisperEngine,
   detectGpuVendor,
   downloadModel,
+  cleanupPartials,
   type DownloadProgress
 } from './models'
-import { ensureEngine, transcribe, freeWhisper, recoverFromHang, type EngineConfig } from './transcribe'
+import {
+  ensureEngine,
+  transcribe,
+  freeWhisper,
+  recoverFromHang,
+  killStrayServers,
+  type EngineConfig
+} from './transcribe'
 import { ensureLlm, cleanup, freeLlm } from './cleanup'
 import { applyReplacements } from './replacements'
 import { stripDisfluencies } from './disfluencies'
@@ -158,7 +166,7 @@ function createOverlayWindow(): void {
     hasShadow: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true, // le preload n'utilise que contextBridge/ipcRenderer -> compatible sandbox
       contextIsolation: true
     }
   })
@@ -252,7 +260,7 @@ function createSettingsWindow(): void {
     titleBarOverlay: { color: '#0a0b12', symbolColor: '#9499bd', height: 36 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true, // le preload n'utilise que contextBridge/ipcRenderer -> compatible sandbox
       contextIsolation: true
     }
   })
@@ -713,8 +721,19 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => openSettings())
 
+  // Défense en profondeur : nos pages sont 100 % locales — aucune raison d'ouvrir une nouvelle
+  // fenêtre ni de naviguer ailleurs (une éventuelle XSS ne pourrait ni ouvrir ni rediriger quoi
+  // que ce soit). On tolère localhost pour le serveur de dev electron-vite (HMR).
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('will-navigate', (event, url) => {
+      if (!url.startsWith('file://') && !url.startsWith('http://localhost')) event.preventDefault()
+    })
+  })
+
   app.whenReady().then(() => {
     log.install(app.getVersion()) // journal persistant + capture des rejets/exceptions non gérés
+    cleanupPartials() // purge les .part orphelins d'un téléchargement interrompu (jusqu'à ~2 Go)
     // autorise le micro pour nos fenêtres
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
       cb(permission === 'media')
@@ -805,7 +824,12 @@ if (!app.requestSingleInstanceLock()) {
     }
     setSettings({ lastSeenVersion: curVersion })
 
-    setTimeout(preloadModels, 1500)
+    // Tue d'abord les whisper-server résiduels d'une session précédente (port 8917 squatté après
+    // un crash), PUIS précharge — sinon le nouveau serveur ne peut pas se binder. Si une dictée a
+    // déjà relancé un serveur entre-temps, killStrayServers épargne son PID (suivi).
+    setTimeout(() => {
+      void killStrayServers().then(preloadModels)
+    }, 1500)
   })
 
   app.on('window-all-closed', () => {

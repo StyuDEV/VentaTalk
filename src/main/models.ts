@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { Readable } from 'node:stream'
 import { getSetting, type WhisperModelId } from './settings'
+import { log } from './log'
 
 export interface ModelInfo {
   id: string
@@ -122,29 +123,44 @@ export async function downloadModel(
   const fileStream = createWriteStream(tmp)
   const nodeStream = Readable.fromWeb(res.body as unknown as Parameters<typeof Readable.fromWeb>[0])
 
-  await new Promise<void>((resolve, reject) => {
-    nodeStream.on('data', (chunk: Buffer) => {
-      received += chunk.length
-      const now = Date.now()
-      if (now - lastEmit > 150) {
-        lastEmit = now
-        onProgress({
-          kind,
-          received,
-          total,
-          percent: total ? Math.min(99, Math.round((received / total) * 100)) : 0,
-          done: false
-        })
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      nodeStream.on('data', (chunk: Buffer) => {
+        received += chunk.length
+        const now = Date.now()
+        if (now - lastEmit > 150) {
+          lastEmit = now
+          onProgress({
+            kind,
+            received,
+            total,
+            percent: total ? Math.min(99, Math.round((received / total) * 100)) : 0,
+            done: false
+          })
+        }
+      })
+      nodeStream.on('error', reject)
+      fileStream.on('error', reject)
+      fileStream.on('finish', () => resolve())
+      nodeStream.pipe(fileStream)
     })
-    nodeStream.on('error', reject)
-    fileStream.on('error', reject)
-    fileStream.on('finish', () => resolve())
-    nodeStream.pipe(fileStream)
-  })
+  } catch (err) {
+    // Coupure réseau/disque en plein téléchargement : on referme le fichier PUIS on supprime le
+    // .part — sinon il traîne sur le disque pour toujours (jusqu'à ~2 Go pour le LLM).
+    await new Promise<void>((r) => fileStream.close(() => r()))
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* noop */
+    }
+    throw err
+  }
 
   // Refuse un fichier TRONQUÉ (coupure réseau silencieuse) au lieu de valider un .part incomplet
   // (qui ferait planter whisper/le LLM au chargement avec une erreur cryptique).
+  // Sans content-length (proxy qui retire l'en-tête), on ne PEUT pas vérifier : on accepte mais on
+  // le journalise (le SHA-256 des fichiers reste la vraie solution — backlog).
+  if (!contentLength) log.warn(`téléchargement ${kind} : pas de content-length, taille non vérifiée`)
   if (contentLength && received !== contentLength) {
     try {
       unlinkSync(tmp)
@@ -159,14 +175,20 @@ export async function downloadModel(
   onProgress({ kind, received: total, total, percent: 100, done: true })
 }
 
-export function cleanupPartial(info: ModelInfo): void {
-  const tmp = join(modelsDir(), `${info.file}.part`)
-  if (existsSync(tmp)) {
-    try {
-      unlinkSync(tmp)
-    } catch {
-      /* noop */
+/** Balaie les .part orphelins d'un téléchargement interrompu par un crash/une fermeture brutale
+ *  (downloadModel nettoie déjà les siens en cas d'erreur). Appelé une fois au démarrage. */
+export function cleanupPartials(): void {
+  try {
+    for (const name of readdirSync(modelsDir())) {
+      if (!name.endsWith('.part')) continue
+      try {
+        unlinkSync(join(modelsDir(), name))
+      } catch {
+        /* noop */
+      }
     }
+  } catch {
+    /* noop */
   }
 }
 
@@ -236,7 +258,7 @@ export function resolveWhisperEngine(): WhisperEngine {
   return detectGpuVendor() === 'nvidia' ? 'cuda' : 'vulkan'
 }
 
-const whisperBinRoot = (): string => join(app.getPath('userData'), 'whisper-bin')
+export const whisperBinRoot = (): string => join(app.getPath('userData'), 'whisper-bin')
 
 // Migration : les anciennes installs ont whisper-server.exe À PLAT dans whisper-bin/ (moteur CUDA).
 // On le déplace UNE fois dans whisper-bin/cuda/ pour éviter de re-télécharger ~646 Mo.
@@ -290,28 +312,40 @@ async function downloadTo(
   let lastEmit = 0
   const fileStream = createWriteStream(dest)
   const nodeStream = Readable.fromWeb(res.body as unknown as Parameters<typeof Readable.fromWeb>[0])
-  await new Promise<void>((resolve, reject) => {
-    nodeStream.on('data', (chunk: Buffer) => {
-      received += chunk.length
-      const now = Date.now()
-      if (now - lastEmit > 150) {
-        lastEmit = now
-        onProgress({
-          kind,
-          received,
-          total,
-          percent: total ? Math.min(99, Math.round((received / total) * 100)) : 0,
-          done: false
-        })
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      nodeStream.on('data', (chunk: Buffer) => {
+        received += chunk.length
+        const now = Date.now()
+        if (now - lastEmit > 150) {
+          lastEmit = now
+          onProgress({
+            kind,
+            received,
+            total,
+            percent: total ? Math.min(99, Math.round((received / total) * 100)) : 0,
+            done: false
+          })
+        }
+      })
+      nodeStream.on('error', reject)
+      fileStream.on('error', reject)
+      fileStream.on('finish', () => resolve())
+      nodeStream.pipe(fileStream)
     })
-    nodeStream.on('error', reject)
-    fileStream.on('error', reject)
-    fileStream.on('finish', () => resolve())
-    nodeStream.pipe(fileStream)
-  })
+  } catch (err) {
+    // Même filet que downloadModel : referme puis supprime le fichier incomplet.
+    await new Promise<void>((r) => fileStream.close(() => r()))
+    try {
+      unlinkSync(dest)
+    } catch {
+      /* noop */
+    }
+    throw err
+  }
 
   // Refuse un zip tronqué (sinon Expand-Archive échoue ensuite avec une erreur obscure).
+  if (!contentLength) log.warn(`téléchargement ${kind} : pas de content-length, taille non vérifiée`)
   if (contentLength && received !== contentLength) {
     try {
       unlinkSync(dest)

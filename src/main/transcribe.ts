@@ -1,7 +1,7 @@
 import os from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { whisperServerExe } from './models'
+import { whisperServerExe, whisperBinRoot } from './models'
 
 const N_THREADS = Math.max(2, Math.min(os.cpus().length, 8))
 const HOST = '127.0.0.1'
@@ -84,18 +84,43 @@ export function activeBackend(): Backend {
   return backend
 }
 
-async function ensureServer(cfg: EngineConfig): Promise<void> {
+// Sérialise les (re)démarrages du serveur : la préchauffe (preloadModels) et une dictée peuvent
+// appeler ensureServer en même temps — sans file, on spawnerait deux serveurs (conflit port 8917)
+// ou on retournerait "prêt" pendant que l'autre appel est encore en train de redémarrer.
+let serverOp: Promise<void> = Promise.resolve()
+
+function ensureServer(cfg: EngineConfig): Promise<void> {
+  const run = serverOp.then(() => doEnsureServer(cfg))
+  serverOp = run.catch(() => {}) // la file survit à un échec (le suivant retentera)
+  return run
+}
+
+async function doEnsureServer(cfg: EngineConfig): Promise<void> {
   const args = serverArgs(cfg)
   const sig = JSON.stringify(args)
   if (server && serverSig === sig) return // déjà lancé avec la même config
   await stopServer()
-  server = spawn(whisperServerExe(), args, { windowsHide: true, stdio: 'ignore' })
-  server.on('exit', () => {
-    server = null
-    serverSig = null
-  })
+  const proc = spawn(whisperServerExe(), args, { windowsHide: true, stdio: 'ignore' })
+  server = proc
   serverSig = sig
-  await waitForServer()
+  proc.on('exit', () => {
+    // Ne réinitialise le suivi QUE si c'est encore CE processus qu'on suit : l'exit d'un ancien
+    // serveur (tué par stopServer juste avant ce spawn) arrive APRÈS — sans ce garde, il
+    // orphelinait le nouveau serveur (zombie sur le port 8917, suivi cassé, dictées via un
+    // serveur à l'ancienne config).
+    if (server === proc) {
+      server = null
+      serverSig = null
+    }
+  })
+  try {
+    await waitForServer()
+  } catch (err) {
+    // Démarrage raté (crash ou trop long) : on ne laisse pas un process suivi-mais-mort — le
+    // prochain appel repartirait sur "déjà lancé" et échouerait au fetch.
+    await stopServer()
+    throw err
+  }
 }
 
 async function waitForServer(): Promise<void> {
@@ -122,6 +147,46 @@ async function stopServer(): Promise<void> {
     server = null
   }
   serverSig = null
+}
+
+/**
+ * Tue les whisper-server.exe RÉSIDUELS d'une session précédente (crash, fermeture brutale…) qui
+ * squattent encore le port 8917 — sinon le serveur relancé ne peut pas se binder et la dictée
+ * échoue. Filtré par CHEMIN (uniquement notre dossier whisper-bin) pour ne jamais toucher un
+ * process homonyme d'une autre app, et épargne le serveur ÉVENTUELLEMENT déjà relancé par nous
+ * (PID suivi). Best-effort, borné : n'empêche jamais le démarrage.
+ */
+export function killStrayServers(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let done = false
+    const finish = (): void => {
+      if (done) return
+      done = true
+      if (timer) clearTimeout(timer)
+      resolve()
+    }
+    // Chemins/PID passés en VARIABLES D'ENVIRONNEMENT (jamais interpolés) : robuste aux
+    // apostrophes dans le chemin et insensible à l'injection (même convention que models.ts).
+    const ps =
+      `$keep = 0; if ($env:VENTA_KEEP) { $keep = [int]$env:VENTA_KEEP }; ` +
+      `Get-CimInstance Win32_Process -Filter "Name='whisper-server.exe'" | ` +
+      `Where-Object { $_.ProcessId -ne $keep -and $_.ExecutablePath -and ` +
+      `$_.ExecutablePath.StartsWith($env:VENTA_BIN + '\\', [System.StringComparison]::OrdinalIgnoreCase) } | ` +
+      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`
+    try {
+      const p = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+        windowsHide: true,
+        stdio: 'ignore',
+        env: { ...process.env, VENTA_BIN: whisperBinRoot(), VENTA_KEEP: String(server?.pid ?? 0) }
+      })
+      p.on('exit', finish)
+      p.on('error', finish)
+      timer = setTimeout(finish, 8000)
+    } catch {
+      finish()
+    }
+  })
 }
 
 export function isLoaded(): boolean {

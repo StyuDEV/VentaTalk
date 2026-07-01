@@ -1,0 +1,36 @@
+name: ci
+
+# Vérifie chaque push/PR : typecheck TypeScript, suites de tests purs (npm test) et build
+# electron-vite. Sur windows (plateforme cible) — les prebuilds natifs (uiohook-napi, nut-js)
+# s'installent sans compilation (npmRebuild:false, voir CLAUDE.md piège n°1).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests (logique pure)
+        run: npm test
+
+      - name: Build (electron-vite)
+        run: npm run build

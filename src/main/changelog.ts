@@ -3,6 +3,9 @@
 // Garder la plus récente en haut de l'objet pour s'y retrouver.
 
 export const CHANGELOG: Record<string, string[]> = {
+  '1.1.1': [
+    'Corrections de bugs et améliorations de fiabilité (moteur de transcription, téléchargements, sécurité).'
+  ],
   '1.1.0': [
     'Nouvelle barre de dictée façon « Dynamic Island » : plus sobre, plus lisible, animation plus douce.',
     'Les messages d’erreur s’affichent maintenant directement à l’écran (petite bannière sous le curseur), plus seulement dans la fenêtre de l’app — par exemple « Rien entendu » si vous avez parlé trop bas.',

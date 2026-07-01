@@ -104,7 +104,12 @@ export async function cleanup(rawText: string, vocabulary?: string): Promise<str
     return raw
   } finally {
     clearTimeout(timer)
-    await context.dispose()
+    // Un échec du dispose ne doit JAMAIS écraser le résultat (texte prêt -> dictée perdue).
+    try {
+      await context.dispose()
+    } catch {
+      /* noop */
+    }
   }
 }
 

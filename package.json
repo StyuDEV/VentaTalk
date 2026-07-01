@@ -1,6 +1,6 @@
 {
   "name": "ventatalk",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "VentaTalk — dictée vocale système locale (clone de Wispr Flow) : whisper.cpp + LLM local, 100% hors-ligne.",
   "main": "./out/main/index.js",
   "author": "VentaTalk",
@@ -11,6 +11,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/run-tests.cjs",
     "rebuild": "electron-builder install-app-deps",
     "dist": "electron-vite build && electron-builder",
     "dist:dir": "electron-vite build && electron-builder --dir",
@@ -28,6 +29,7 @@
     "electron": "^37.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
+    "esbuild": "^0.25.0",
     "typescript": "^5.6.0"
   }
 }
