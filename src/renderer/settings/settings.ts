@@ -214,6 +214,23 @@ async function renderModels(): Promise<void> {
 
 v.onToast((m: string) => showToast(m))
 
+/**
+ * Le micro mémorisé n'est plus dans la liste (débranché, id changé après une réinstall / MAJ
+ * Windows) : sans ça, `sel.value = current` ne matche aucune option → le <select> restait VIDE
+ * (selectedIndex -1, « rien n'est sélectionné »). On l'affiche explicitement ; la capture, elle,
+ * retombe déjà sur le micro par défaut (repli dans l'overlay).
+ */
+function selectMicOrExplain(sel: HTMLSelectElement, current: string): void {
+  sel.value = current
+  if (sel.selectedIndex === -1 && current) {
+    const opt = document.createElement('option')
+    opt.value = current
+    opt.textContent = 'Micro enregistré introuvable — « Par défaut » utilisé'
+    sel.appendChild(opt)
+    sel.value = current
+  }
+}
+
 async function populateMics(current: string): Promise<void> {
   const sel = $('micDevice') as HTMLSelectElement
   try {
@@ -228,7 +245,7 @@ async function populateMics(current: string): Promise<void> {
     sel.innerHTML =
       '<option value="">Par défaut</option>' +
       mics.map((d, i) => `<option value="${d.deviceId}">${d.label || 'Micro ' + (i + 1)}</option>`).join('')
-    sel.value = current
+    selectMicOrExplain(sel, current)
   } catch {
     /* noop */
   }
@@ -388,7 +405,7 @@ async function populateWzMics(current: string): Promise<void> {
     sel.innerHTML =
       '<option value="">Par défaut</option>' +
       mics.map((d, i) => `<option value="${d.deviceId}">${d.label || 'Micro ' + (i + 1)}</option>`).join('')
-    sel.value = current
+    selectMicOrExplain(sel, current)
   } catch {
     /* noop */
   }
@@ -408,9 +425,18 @@ async function startMicTest(): Promise<void> {
       audio: deviceId ? { deviceId: { exact: deviceId } } : true
     })
   } catch {
-    setMicStatus('Micro inaccessible — vérifie les permissions micro de Windows.', 'err')
-    retry.style.display = ''
-    return
+    // Micro choisi introuvable (débranché, id périmé) : on retente sur le micro par défaut
+    // avant d'afficher l'erreur — même repli que la capture de dictée (overlay).
+    try {
+      micStream = deviceId ? await navigator.mediaDevices.getUserMedia({ audio: true }) : null
+    } catch {
+      micStream = null
+    }
+    if (!micStream) {
+      setMicStatus('Micro inaccessible — vérifie les permissions micro de Windows.', 'err')
+      retry.style.display = ''
+      return
+    }
   }
   micCtx = new AudioContext()
   const src = micCtx.createMediaStreamSource(micStream)

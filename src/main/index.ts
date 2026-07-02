@@ -174,11 +174,36 @@ function createOverlayWindow(): void {
   overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlayWin.setIgnoreMouseEvents(true) // purement informatif -> clic-traversant (la grande zone ne bloque rien)
   loadPage(overlayWin, 'overlay')
+  // Si le renderer de l'overlay meurt (crash GPU, OOM…), il n'y a plus NI barre NI capture micro
+  // jusqu'au redémarrage de l'app — silencieusement. On recrée la fenêtre et on remet le pipeline
+  // à idle (la dictée en cours est perdue : sa capture est morte avec le renderer).
+  overlayWin.webContents.on('render-process-gone', (_e, details) => {
+    if (isQuitting || details.reason === 'clean-exit') return
+    log.warn(`overlay: renderer disparu (${details.reason}) — fenêtre recréée`)
+    const dead = overlayWin
+    overlayWin = null
+    try {
+      dead?.destroy()
+    } catch {
+      /* noop */
+    }
+    createOverlayWindow()
+    cancelDictation()
+  })
+  // Même filet que la fenêtre de réglages : une destruction inattendue lâche la référence
+  // (le prochain showOverlay/sendOverlay recrée ou ignore au lieu de crasher). Le handler ne
+  // touche la variable QUE si elle pointe encore cette instance (recréation ci-dessus).
+  const win = overlayWin
+  win.on('closed', () => {
+    if (overlayWin === win) overlayWin = null
+  })
 }
 
 function positionOverlay(): void {
   if (!overlayWin) return
-  const { workArea } = screen.getPrimaryDisplay()
+  // Écran du CURSEUR (= là où l'utilisateur travaille), pas l'écran principal : en multi-écrans,
+  // la barre s'affichait toujours sur le principal → « l'overlay n'apparaît pas » vu de l'autre écran.
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const [w, h] = overlayWin.getSize()
   const x = Math.round(workArea.x + (workArea.width - w) / 2)
   // Bas de la fenêtre au bas de l'écran (au-dessus de la barre des tâches) : la pilule
@@ -200,6 +225,12 @@ function showOverlay(): void {
   }
   positionOverlay()
   overlayWin.showInactive() // affiche SANS prendre le focus
+  // Windows « oublie » parfois le flag topmost après un hide() + showInactive() (bug Electron
+  // connu) : la fenêtre s'affiche alors DERRIÈRE l'app active → barre invisible par intermittence.
+  // On réaffirme le niveau + remonte la fenêtre à chaque affichage (aucun vol de focus : la
+  // fenêtre est focusable:false).
+  overlayWin.setAlwaysOnTop(true, 'screen-saver')
+  overlayWin.moveTop()
 }
 
 function hideOverlay(): void {
@@ -229,6 +260,8 @@ function overlayToast(message: string): void {
   if (overlayToastTimer) clearTimeout(overlayToastTimer)
   positionOverlay()
   overlayWin.showInactive()
+  overlayWin.setAlwaysOnTop(true, 'screen-saver') // même réaffirmation topmost que showOverlay
+  overlayWin.moveTop()
   sendOverlay('overlay:toast', message)
   // garde la fenêtre affichée le temps du toast (entrée + maintien + sortie ~240 ms), puis masque.
   overlayToastTimer = setTimeout(() => {
@@ -238,7 +271,8 @@ function overlayToast(message: string): void {
 }
 
 function sendOverlay(channel: string, payload?: unknown): void {
-  overlayWin?.webContents.send(channel, payload)
+  if (!overlayWin || overlayWin.isDestroyed()) return
+  overlayWin.webContents.send(channel, payload)
 }
 
 function createSettingsWindow(): void {
@@ -257,7 +291,11 @@ function createSettingsWindow(): void {
     // (min/agrandir/fermer) Windows à notre palette. La zone de drag est définie en CSS
     // (.titlebar, -webkit-app-region: drag). Conserve resize + Snap Layouts natifs.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#0a0b12', symbolColor: '#9499bd', height: 36 },
+    // Fond TRANSPARENT (vérifié OK sur Electron 37/Windows) : les boutons reposent directement
+    // sur le contenu, quel que soit le fond (barre #0a0b12, dégradé de l'écran de MAJ, modals).
+    // Avec une couleur opaque, le bloc des boutons ressortait en rectangle « pas incrusté »
+    // sur l'écran plein de mise à jour (fond dégradé).
+    titleBarOverlay: { color: '#00000000', symbolColor: '#9499bd', height: 36 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true, // le preload n'utilise que contextBridge/ipcRenderer -> compatible sandbox
@@ -274,10 +312,17 @@ function createSettingsWindow(): void {
       settingsWin?.hide()
     }
   })
+  // Si la fenêtre est détruite (quel que soit le chemin), on lâche la référence : sinon le
+  // prochain openSettings()/toast() appelle show()/send() sur un objet mort → uncaughtException
+  // « Object has been destroyed » (crash réel vu au clic tray « Réglages… »).
+  const win = settingsWin
+  win.on('closed', () => {
+    if (settingsWin === win) settingsWin = null
+  })
 }
 
 function openSettings(): void {
-  if (!settingsWin) createSettingsWindow()
+  if (!settingsWin || settingsWin.isDestroyed()) createSettingsWindow()
   settingsWin?.show()
   settingsWin?.focus()
 }

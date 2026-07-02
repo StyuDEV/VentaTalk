@@ -3,6 +3,12 @@
 // Garder la plus récente en haut de l'objet pour s'y retrouver.
 
 export const CHANGELOG: Record<string, string[]> = {
+  '1.1.2': [
+    'La barre de dictée ne disparaît plus par intermittence : elle repasse systématiquement au premier plan et s’affiche sur l’écran où vous travaillez (multi-écrans).',
+    'Micro débranché ou introuvable : la dictée bascule automatiquement sur le micro par défaut au lieu de ne plus rien enregistrer, et les réglages l’indiquent clairement.',
+    'Correction d’un plantage possible à l’ouverture des Réglages depuis la zone de notification.',
+    'Les boutons de la fenêtre (réduire, fermer) s’intègrent désormais parfaitement à l’écran de mise à jour.'
+  ],
   '1.1.1': [
     'Corrections de bugs et améliorations de fiabilité (moteur de transcription, téléchargements, sécurité).'
   ],

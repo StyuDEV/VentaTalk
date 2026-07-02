@@ -73,7 +73,18 @@ async function initAudio(): Promise<void> {
     }
     if (micDeviceId) audio.deviceId = { exact: micDeviceId }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio })
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio })
+    } catch (err) {
+      // Micro mémorisé introuvable (débranché, id changé après une réinstall / MAJ Windows) :
+      // sans repli, TOUTE la dictée était cassée jusqu'à ce que l'utilisateur re-choisisse un
+      // micro dans les réglages. On retombe sur le micro par défaut du système.
+      if (!micDeviceId) throw err
+      console.warn('micro mémorisé introuvable, repli sur le micro par défaut', err)
+      delete audio.deviceId
+      stream = await navigator.mediaDevices.getUserMedia({ audio })
+    }
     micStream = stream
 
     // Chromium délivre directement du 16 kHz mono : aucun rééchantillonnage manuel.
