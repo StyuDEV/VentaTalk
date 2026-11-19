@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" width="860" height="300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>What happens between pressing the key and the text appearing</title>
+  <rect width="860" height="300" rx="16" fill="#0f1117"/>
+
+  <!-- étapes : un point lumineux parcourt la chaîne sur un cycle de 8 s -->
+  <g font-size="13" text-anchor="middle">
+    <g transform="translate(20 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#2f3442"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">Hold F9</text>
+      <text x="60" y="54" fill="#8b91a1">and speak</text>
+    </g>
+    <g transform="translate(160 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#2f3442"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">Microphone</text>
+      <text x="60" y="54" fill="#8b91a1">16 kHz + pre-roll</text>
+    </g>
+    <g transform="translate(300 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#2f3442"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">Silence cut</text>
+      <text x="60" y="54" fill="#8b91a1">VAD</text>
+    </g>
+    <g transform="translate(440 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#6366f1"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">whisper.cpp</text>
+      <text x="60" y="54" fill="#a5a8ff">on your GPU</text>
+    </g>
+    <g transform="translate(580 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#6366f1"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">Local LLM</text>
+      <text x="60" y="54" fill="#a5a8ff">cleans the text</text>
+    </g>
+    <g transform="translate(720 40)">
+      <rect width="120" height="74" rx="12" fill="#1b1e27" stroke="#22c55e"/>
+      <text x="60" y="32" fill="#eef0f6" font-weight="600">Typed</text>
+      <text x="60" y="54" fill="#86efac">at your cursor</text>
+    </g>
+  </g>
+  <path d="M140 77h20M280 77h20M420 77h20M560 77h20M700 77h20" stroke="#3a4050" stroke-width="2"/>
+  <path d="M80 130H780" stroke="#262a36" stroke-width="2" stroke-linecap="round"/>
+  <circle r="5" fill="#a5a8ff" cy="130" cx="80">
+    <animate attributeName="cx" dur="8s" repeatCount="indefinite" values="80;220;360;500;640;780;780" keyTimes="0;0.12;0.24;0.40;0.55;0.65;1"/>
+    <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0" keyTimes="0;0.65;0.68;1"/>
+  </circle>
+
+  <!-- ce que tu dis -> ce qui s'écrit -->
+  <text x="20" y="164" font-size="12" fill="#8b91a1" letter-spacing="1">WHAT YOU SAY</text>
+  <rect x="20" y="170" width="400" height="56" rx="12" fill="#1b1e27"/>
+  <text x="36" y="203" font-size="14" fill="#c7cad4">"euh so can you send me the uh report by friday"</text>
+
+  <text x="440" y="164" font-size="12" fill="#8b91a1" letter-spacing="1">WHAT GETS TYPED</text>
+  <rect x="440" y="170" width="400" height="56" rx="12" fill="#1b1e27" stroke="#22c55e" stroke-opacity=".5"/>
+  <clipPath id="frappe"><rect x="456" y="180" height="36" width="0">
+    <animate attributeName="width" dur="8s" repeatCount="indefinite" values="0;0;370;370" keyTimes="0;0.65;0.85;1"/>
+  </rect></clipPath>
+  <text x="456" y="203" font-size="14" fill="#eef0f6" clip-path="url(#frappe)">So, can you send me the report by Friday?</text>
+
+  <text x="430" y="268" text-anchor="middle" font-size="13" fill="#8b91a1">Everything runs on your PC. Nothing is sent online.</text>
+</svg>
